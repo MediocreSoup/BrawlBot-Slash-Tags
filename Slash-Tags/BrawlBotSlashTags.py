@@ -108,7 +108,7 @@ class SlashTags(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.tag_structure = tagStructure
-        self.group = app_commands.Group(name="slashtags", description="Choose a preset tag to send to chat")
+        self.group = app_commands.Group(name="tag", description="Choose a preset tag to send to chat")
         
         for category, tags in self.tag_structure.items():
 

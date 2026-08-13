@@ -1,0 +1,6 @@
+{
+    "author": ["MediocreSoup"],
+    "description": ["Mirrors/replaces the tags cog with slash commands for BrawlBot"],
+    "short": ["Slash commands for BrawlBot tags"],
+    "min_python_version": [3, 8, 10]
+}

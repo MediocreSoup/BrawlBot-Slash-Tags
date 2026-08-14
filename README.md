@@ -25,7 +25,7 @@ Note: `[p]` is the prefix for the bot, in brawlbot's case "."
 
 ### Retrieve a tag
 
-The command name is `/tag` or `[p][tagname]`, and the tag value is returned as an embed when possible.
+The command name is `/tag` or `[p][tagname]`, and tags default to embed output unless explicitly set to plain text with `/managetags set_tag_embed ... embed:false` or a JSON object using `"embed": false`.
 
 Slash commands:
 
@@ -49,8 +49,9 @@ These commands are slash-only and restricted to the admin role (lowk hardcoded t
 
 ```text
 /managetags add_category category:newtohelpchat
-/managetags add_tag category:newtohelpchat tag:dontasktoask value:https://dontasktoask.com/
-/managetags edit_tag category:newtohelpchat tag:dontasktoask value:https://example.com/
+/managetags add_tag category:newtohelpchat tag:dontasktoask value:https://dontasktoask.com/ embed:true
+/managetags edit_tag category:newtohelpchat tag:dontasktoask value:https://example.com/ embed:false
+/managetags set_tag_embed category:newtohelpchat tag:dontasktoask embed:false
 /managetags rename_tag category:newtohelpchat tag:dontasktoask new_tag:example
 /managetags rename_category category:newtohelpchat new_category:help
 /managetags move_tag category:newtohelpchat tag:dontasktoask new_category:newtohelpchat2
@@ -81,7 +82,7 @@ There are two supported ways to use it:
 
 Then attach the file in Discord when the command prompt asks for it.
 
-The command accepts either a raw JSON string or a JSON attachment, and it merges the imported data into the saved config without deleting existing tags.
+The command accepts either a raw JSON string or a JSON attachment, and it merges the imported data into the saved config without deleting existing tags. Legacy plain-string tags still load correctly; plain-text overrides can be stored as `{ "value": "...", "embed": false }`.
 
 ## Notes
 

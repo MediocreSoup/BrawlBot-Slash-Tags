@@ -68,6 +68,7 @@ class SlashTags(commands.Cog):
         self.manage.add_command(self._build_rename_category())
         self.manage.add_command(self._build_move_tag())
         self.manage.add_command(self._build_list_tags())
+        self.manage.add_command(self._build_set_tag_embed())
         self.manage.add_command(self._build_toggle_text_commands())
         self.manage.add_command(self._build_import_json())
 
@@ -93,6 +94,17 @@ class SlashTags(commands.Cog):
         await self.config.tags.set(data)
         self._backup_tags(data)
 
+    def _normalize_tag_value(self, value):
+        if isinstance(value, dict):
+            if "value" in value:
+                return value.get("value"), bool(value.get("embed", True))
+            if "content" in value:
+                return value.get("content"), bool(value.get("embed", True))
+            if "text" in value:
+                return value.get("text"), bool(value.get("embed", True))
+
+        return value, True
+
     def _build_text_tag_command(self, tag_name: str):
         async def _callback(ctx):
             data = await self._load_tags()
@@ -102,6 +114,11 @@ class SlashTags(commands.Cog):
                     break
             else:
                 await ctx.send(f"`{tag_name}` doesnt exist.")
+                return
+
+            value, should_embed = self._normalize_tag_value(value)
+            if not should_embed:
+                await ctx.send(str(value))
                 return
 
             embed = await self._build_tag_embed(value, ctx)
@@ -188,12 +205,6 @@ class SlashTags(commands.Cog):
         channel = interaction.channel if interaction is not None and interaction.channel is not None else None
         color = await self.bot.get_embed_color(channel) if channel is not None else 0x5865F2
         embed = discord.Embed(description=text, color=color)
-
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-        if text.startswith("http") and text.lower().endswith(image_extensions):
-            embed.set_image(url=text)
-            embed.description = " "
-
         return embed
 
     def _build_add_category(self):
@@ -217,9 +228,9 @@ class SlashTags(commands.Cog):
 
     def _build_add_tag(self):
         @app_commands.command(name="add_tag", description="Add or update a tag")
-        @app_commands.describe(category="The category to save into", tag="The tag name", value="A Discord message link or raw text")
+        @app_commands.describe(category="The category to save into", tag="The tag name", value="A Discord message link or raw text", embed="Whether this tag should display in an embed")
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
-        async def add_tag(interaction: discord.Interaction, category: str, tag: str, value: str):
+        async def add_tag(interaction: discord.Interaction, category: str, tag: str, value: str, embed: bool = True):
             if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
@@ -229,17 +240,18 @@ class SlashTags(commands.Cog):
                 data[category] = {}
 
             resolved_value = await self._resolve_message_link(value)
-            data[category][tag] = resolved_value
+            stored_value = resolved_value if embed else {"value": resolved_value, "embed": False}
+            data[category][tag] = stored_value
             await self._save_tags(data)
-            await interaction.response.send_message(f"Saved `{tag}` under `{category}`.", ephemeral=True)
+            await interaction.response.send_message(f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
 
         return add_tag
 
     def _build_edit_tag(self):
         @app_commands.command(name="edit_tag", description="Edit an existing tag")
-        @app_commands.describe(category="The tag category", tag="The tag name", value="The new value")
+        @app_commands.describe(category="The tag category", tag="The tag name", value="The new value", embed="Whether this tag should display in an embed")
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
-        async def edit_tag(interaction: discord.Interaction, category: str, tag: str, value: str):
+        async def edit_tag(interaction: discord.Interaction, category: str, tag: str, value: str, embed: bool = True):
             if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
@@ -249,9 +261,10 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
-            data[category][tag] = await self._resolve_message_link(value)
+            resolved_value = await self._resolve_message_link(value)
+            data[category][tag] = resolved_value if embed else {"value": resolved_value, "embed": False}
             await self._save_tags(data)
-            await interaction.response.send_message(f"Updated `{tag}` in `{category}`.", ephemeral=True)
+            await interaction.response.send_message(f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
 
         return edit_tag
 
@@ -378,6 +391,30 @@ class SlashTags(commands.Cog):
 
         return list_tags
 
+    def _build_set_tag_embed(self):
+        @app_commands.command(name="set_tag_embed", description="Set whether an existing tag should display in an embed")
+        @app_commands.describe(category="The tag category", tag="The tag name", embed="Whether this tag should display in an embed")
+        @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
+        async def set_tag_embed(interaction: discord.Interaction, category: str, tag: str, embed: bool):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags()
+            if category not in data or tag not in data[category]:
+                await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
+                return
+
+            value, _ = self._normalize_tag_value(data[category][tag])
+            data[category][tag] = value if embed else {"value": value, "embed": False}
+            await self._save_tags(data)
+            await interaction.response.send_message(
+                f"`{tag}` in `{category}` now {'uses an embed' if embed else 'sends as plain text'}.",
+                ephemeral=True,
+            )
+
+        return set_tag_embed
+
     def _build_toggle_text_commands(self):
         @app_commands.command(name="toggle_text_commands", description="Enable or disable dynamic text tag commands")
         @app_commands.describe(enabled="Whether text tag commands should be enabled")
@@ -435,7 +472,12 @@ class SlashTags(commands.Cog):
                     await interaction.response.send_message(f"Category `{category}` is not a valid object of tags.", ephemeral=True)
                     return
                 merged.setdefault(category, {})
-                merged[category].update(tags)
+                for tag_name, tag_value in tags.items():
+                    if isinstance(tag_value, dict):
+                        if "value" in tag_value or "content" in tag_value or "text" in tag_value:
+                            merged[category][tag_name] = tag_value
+                            continue
+                    merged[category][tag_name] = tag_value
 
             await self._save_tags(merged)
             await interaction.response.send_message("Imported tags from JSON.", ephemeral=True)
@@ -451,6 +493,11 @@ class SlashTags(commands.Cog):
 
         if value is None:
             await interaction.response.send_message(f"I couldn't find `{tag}` in `{category}`.", ephemeral=True)
+            return
+
+        value, should_embed = self._normalize_tag_value(value)
+        if not should_embed:
+            await interaction.response.send_message(str(value))
             return
 
         embed = await self._build_tag_embed(value, interaction)

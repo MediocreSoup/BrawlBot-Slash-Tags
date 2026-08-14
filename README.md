@@ -45,7 +45,7 @@ Text commands:
 
 ### Manage tags
 
-These commands are slash-only and restricted to the admin role (lowk hardcoded the role id im sure its fine).
+These commands are slash-only and restricted to the admin role (lowk hardcoded the role ID im sure its fine, to change the required role ID go to `line 12` of `BrawlBotSlashTags/brawlbotslashtags.py`).
 
 ```text
 /managetags add_category category:newtohelpchat

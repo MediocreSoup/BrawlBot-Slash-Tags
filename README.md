@@ -91,6 +91,5 @@ The command accepts either a raw JSON string or a JSON attachment, and it merges
 
 - Tags are stored in Red's config system, so they persist across bot restarts.
 - Tags are automatically backed up as json files every tag change, they are stored in the backups folder inside this cog
-- The admin role is currently configured in the cog as the required role for management commands.
 - Values can be raw text or a Discord message link; message links are resolved to the linked message content before saving.
 - If everything burns down, you have full permission to send angry messages to @MediocreSoup on discord 👍

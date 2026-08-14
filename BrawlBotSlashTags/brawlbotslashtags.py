@@ -56,14 +56,26 @@ class SlashTags(commands.Cog):
 
         self.manage = app_commands.Group(
             name="managetags",
-            description="Manage saved tags"
+            description="Manage saved tags",
+            guild_only=True
         )
 
         self.manage.add_command(self._build_add_category())
         self.manage.add_command(self._build_add_tag())
+        self.manage.add_command(self._build_edit_tag())
         self.manage.add_command(self._build_delete_tag())
+        self.manage.add_command(self._build_rename_tag())
+        self.manage.add_command(self._build_rename_category())
+        self.manage.add_command(self._build_move_tag())
         self.manage.add_command(self._build_list_tags())
         self.manage.add_command(self._build_import_json())
+
+    def _can_manage_tags(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+        if not isinstance(interaction.user, discord.Member):
+            return False
+        return interaction.user.get_role(ADMIN_ROLE_ID) is not None
 
     async def _load_tags(self):
         return await self.config.tags()
@@ -133,7 +145,7 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category name to create")
         @app_commands.autocomplete(category=category_autocomplete)
         async def add_category(interaction: discord.Interaction, category: str):
-            if not interaction.user.get_role(ADMIN_ROLE_ID):
+            if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -152,7 +164,7 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category to save into", tag="The tag name", value="A Discord message link or raw text")
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def add_tag(interaction: discord.Interaction, category: str, tag: str, value: str):
-            if not interaction.user.get_role(ADMIN_ROLE_ID):
+            if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -167,12 +179,32 @@ class SlashTags(commands.Cog):
 
         return add_tag
 
+    def _build_edit_tag(self):
+        @app_commands.command(name="edit_tag", description="Edit an existing tag")
+        @app_commands.describe(category="The tag category", tag="The tag name", value="The new value")
+        @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
+        async def edit_tag(interaction: discord.Interaction, category: str, tag: str, value: str):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags()
+            if category not in data or tag not in data[category]:
+                await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
+                return
+
+            data[category][tag] = await self._resolve_message_link(value)
+            await self._save_tags(data)
+            await interaction.response.send_message(f"Updated `{tag}` in `{category}`.", ephemeral=True)
+
+        return edit_tag
+
     def _build_delete_tag(self):
         @app_commands.command(name="delete_tag", description="Delete a tag")
         @app_commands.describe(category="The category to remove from", tag="The tag name")
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def delete_tag(interaction: discord.Interaction, category: str, tag: str):
-            if not interaction.user.get_role(ADMIN_ROLE_ID):
+            if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -182,17 +214,100 @@ class SlashTags(commands.Cog):
                 return
 
             del data[category][tag]
+            if not data[category]:
+                del data[category]
             await self._save_tags(data)
             await interaction.response.send_message(f"Deleted `{tag}` from `{category}`.", ephemeral=True)
 
         return delete_tag
+
+    def _build_rename_tag(self):
+        @app_commands.command(name="rename_tag", description="Rename an existing tag")
+        @app_commands.describe(category="The category the tag is in", tag="The current tag name", new_tag="The new tag name")
+        @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
+        async def rename_tag(interaction: discord.Interaction, category: str, tag: str, new_tag: str):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags()
+            if category not in data or tag not in data[category]:
+                await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
+                return
+
+            if new_tag in data[category]:
+                await interaction.response.send_message(f"A tag named `{new_tag}` already exists in `{category}`.", ephemeral=True)
+                return
+
+            value = data[category].pop(tag)
+            data[category][new_tag] = value
+            await self._save_tags(data)
+            await interaction.response.send_message(f"Renamed `{tag}` to `{new_tag}` in `{category}`.", ephemeral=True)
+
+        return rename_tag
+
+    def _build_rename_category(self):
+        @app_commands.command(name="rename_category", description="Rename a tag category")
+        @app_commands.describe(category="The current category name", new_category="The new category name")
+        @app_commands.autocomplete(category=category_autocomplete)
+        async def rename_category(interaction: discord.Interaction, category: str, new_category: str):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags()
+            if category not in data:
+                await interaction.response.send_message(f"Category `{category}` does not exist.", ephemeral=True)
+                return
+
+            if new_category in data:
+                await interaction.response.send_message(f"Category `{new_category}` already exists.", ephemeral=True)
+                return
+
+            data[new_category] = data.pop(category)
+            await self._save_tags(data)
+            await interaction.response.send_message(f"Renamed category `{category}` to `{new_category}`.", ephemeral=True)
+
+        return rename_category
+
+    def _build_move_tag(self):
+        @app_commands.command(name="move_tag", description="Move a tag into a different category")
+        @app_commands.describe(category="The current category", tag="The tag name", new_category="The destination category")
+        @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
+        async def move_tag(interaction: discord.Interaction, category: str, tag: str, new_category: str):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags()
+            if category not in data or tag not in data[category]:
+                await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
+                return
+
+            if new_category == category:
+                await interaction.response.send_message("The destination category is the same as the current category.", ephemeral=True)
+                return
+
+            data.setdefault(new_category, {})
+            if tag in data[new_category]:
+                await interaction.response.send_message(f"A tag named `{tag}` already exists in `{new_category}`.", ephemeral=True)
+                return
+
+            value = data[category].pop(tag)
+            data[new_category][tag] = value
+            if not data[category]:
+                del data[category]
+            await self._save_tags(data)
+            await interaction.response.send_message(f"Moved `{tag}` from `{category}` to `{new_category}`.", ephemeral=True)
+
+        return move_tag
 
     def _build_list_tags(self):
         @app_commands.command(name="list", description="List tags in a category")
         @app_commands.describe(category="The category to list")
         @app_commands.autocomplete(category=category_autocomplete)
         async def list_tags(interaction: discord.Interaction, category: str):
-            if not interaction.user.get_role(ADMIN_ROLE_ID):
+            if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -212,10 +327,10 @@ class SlashTags(commands.Cog):
         @app_commands.describe(json_data="A JSON object mapping category names to tag dictionaries", attachment="Optional JSON file to import")
         async def import_json(
             interaction: discord.Interaction,
-            json_data=None,
-            attachment=None,
+            json_data: str = None,
+            attachment: discord.Attachment = None,
         ):
-            if not interaction.user.get_role(ADMIN_ROLE_ID):
+            if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -275,7 +390,3 @@ class SlashTags(commands.Cog):
 
     async def cog_unload(self):
         self.bot.tree.remove_command(self.manage.name)
-
-
-async def setup(bot):
-    await bot.add_cog(SlashTags(bot))

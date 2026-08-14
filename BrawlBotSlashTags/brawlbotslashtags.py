@@ -1,9 +1,7 @@
 import discord
 from redbot.core import commands, app_commands
 
-# all tags are wrapped inside quote blocks
-
-#TODO: fix getstarted slash command
+# all tags are wrapped inside embeds
 
 __criticalregistry__ = {
     "hi": "hello, world!",
@@ -15,9 +13,9 @@ newtohelpchat = {
     "dontasktoask": "https://dontasktoask.com/",
     "return": "https://cdn.discordapp.com/attachments/1138164798652166264/1390151984148910090/output.gif?ex=6a7f212c&is=6a7dcfac&hm=3bcf97d4c61e2fcad70efcea8d427df3d5c5f817357ad6ecc24aec83fee089fa&",
     "codeblock": """
-\\```lua
+```lua
 -- your code goes here
-\\```
+```
 https://media.discordapp.net/attachments/428675939572908032/847863317162360862/How_To_Format_Code_In_Discord.gif?ex=6a7f383f&is=6a7de6bf&hm=6a64d68b9935e07aea89fa96625ed3d00aaf703e3b17e04d2abaed2af4a5e927&
 """,
     "notyourslave": """The people answering questions here are volunteers, not your personal coders. Posting \"make this script for me\" or \"fix it\" with no context isn't enough for anyone to help.
@@ -86,7 +84,7 @@ All topics in the GUI tutorial are incredibly useful, and none of them should be
     - 3. On the dropdown menu, select Guided Learning
     - 4. Enter your question or topic, and begin learning **
     """,
-    "getstarted": "Here is the best tutorial series for starting Roblox Studio Luau scripting: \n https://www.youtube.com/watch?v=9MUgLaF22Yo&list=PLQ1Qd31Hmi3W_CGDzYOp7enyHlOuO3MtC \n Start on Episode 1. Run `.tutorialguide` or `slash command api not decided yet, if you see this I have a skill issue` command for more guidance!",
+    "getstarted": "Here is the best tutorial series for starting Roblox Studio Luau scripting: \n https://www.youtube.com/watch?v=9MUgLaF22Yo&list=PLQ1Qd31Hmi3W_CGDzYOp7enyHlOuO3MtC \n Start on Episode 1. Run `.tutorialguide` or `/tag newtoscripting tutorialguide` command for more guidance!",
     "cframe": "A CFrame is an object that stores position and rotation, learn more here: \n https://devforum.roblox.com/t/comprehensive-beginners-guide-to-cframes-and-how-to-use-them-cframe-guide/1334085" 
 }
 
@@ -98,13 +96,13 @@ tagStructure = {
     "__criticalregistry__": __criticalregistry__,
     "newtohelpchat": newtohelpchat,
     "packages": packages,
-    "newtoscripting": newtoscripting
+    "newtoscripting": newtoscripting,
+    "scripting": scripting,
 }
 
 class SlashTags(commands.Cog):
     """Me when I cog:"""
 
-    # thanks copilot
     def __init__(self, bot):
         self.bot = bot
         self.tag_structure = tagStructure
@@ -118,7 +116,17 @@ class SlashTags(commands.Cog):
                     if not content:
                         await interaction.response.send_message(f"Unknown tag `{tag}` in `{cat}`", ephemeral=True)
                         return
-                    await interaction.response.send_message(content)
+
+                    # Fetch the server's RedBot embed color theme dynamically
+                    embed_color = await self.bot.get_embed_color(interaction.channel)
+
+                    # Build the embed using the content as the description
+                    embed = discord.Embed(
+                        description=content,
+                        color=embed_color
+                    )
+                    
+                    await interaction.response.send_message(embed=embed)
                 return callback
 
             def make_autocomplete(tag_dict):
@@ -134,3 +142,12 @@ class SlashTags(commands.Cog):
             func = app_commands.autocomplete(tag=make_autocomplete(tags))(func)
             cmd = app_commands.command(name=category, description=f"Tags for {category}")(func)
             self.group.add_command(cmd)
+
+    async def cog_load(self):
+        self.bot.tree.add_command(self.group)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.group.name)
+
+async def setup(bot):
+    await bot.add_cog(SlashTags(bot))

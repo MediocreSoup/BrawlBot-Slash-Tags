@@ -52,7 +52,7 @@ class SlashTags(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=881728942000123456)
-        self.config.register_global(tags={})
+        self.config.register_global(tags={}, text_commands_enabled=True)
 
         self.manage = app_commands.Group(
             name="managetags",
@@ -68,6 +68,7 @@ class SlashTags(commands.Cog):
         self.manage.add_command(self._build_rename_category())
         self.manage.add_command(self._build_move_tag())
         self.manage.add_command(self._build_list_tags())
+        self.manage.add_command(self._build_toggle_text_commands())
         self.manage.add_command(self._build_import_json())
 
     def _can_manage_tags(self, interaction: discord.Interaction) -> bool:
@@ -119,6 +120,11 @@ class SlashTags(commands.Cog):
         for command in existing:
             if self.bot.get_command(command.name) is command:
                 self.bot.remove_command(command.name)
+
+        self._text_tag_commands = []
+
+        if not await self.config.text_commands_enabled():
+            return
 
         data = await self._load_tags()
         seen = set()
@@ -371,6 +377,23 @@ class SlashTags(commands.Cog):
             await interaction.response.send_message(f"Tags in `{category}`: {names}", ephemeral=True)
 
         return list_tags
+
+    def _build_toggle_text_commands(self):
+        @app_commands.command(name="toggle_text_commands", description="Enable or disable dynamic text tag commands")
+        @app_commands.describe(enabled="Whether text tag commands should be enabled")
+        async def toggle_text_commands(interaction: discord.Interaction, enabled: bool):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            await self.config.text_commands_enabled.set(enabled)
+            await self._sync_text_tag_commands()
+            await interaction.response.send_message(
+                f"Text tag commands are now {'enabled' if enabled else 'disabled'}.",
+                ephemeral=True,
+            )
+
+        return toggle_text_commands
 
     def _build_import_json(self):
         @app_commands.command(name="import_json", description="Import tags from a JSON object or attached JSON file")

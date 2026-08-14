@@ -8,6 +8,8 @@ WARNING: The following file has been slopped up by copilot and only skimmed over
 
 This cog is intended for an existing RedBot instance.
 
+This can also replace the default tags cog by enabling text commands with the command `/managetags toggle_text_commands enabled:boolean`
+
 Note: `[p]` is the prefix for the bot, in brawlbot's case "."
 
 ```text

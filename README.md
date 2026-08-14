@@ -26,11 +26,12 @@ I did not test ts yet im too lazy to make a whole red bot instance myself
 ```text
 .load BrawlBotSlashTags
 ```
+Red Bot will automatically register and sync the slash commands with Discord upon loading. Note that Discord can sometimes take up to 1 hour to display global slash commands, though server-specific commands usually appear immediately.
 
-4. Sync slash commands:
+## Force reload if commands dont load
 
 ```text
-.slash sync
+.reload brawlbotslashtags
 ```
 
 ## Example usage

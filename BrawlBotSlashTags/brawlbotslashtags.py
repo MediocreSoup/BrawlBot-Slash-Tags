@@ -92,6 +92,56 @@ class SlashTags(commands.Cog):
         await self.config.tags.set(data)
         self._backup_tags(data)
 
+    def _build_text_tag_command(self, tag_name: str):
+        async def _callback(ctx):
+            data = await self._load_tags()
+            for category_data in data.values():
+                if tag_name in category_data:
+                    value = category_data[tag_name]
+                    break
+            else:
+                await ctx.send(f"`{tag_name}` doesnt exist.")
+                return
+
+            embed = await self._build_tag_embed(value, ctx)
+            if embed.color is None:
+                embed.color = await self.bot.get_embed_color(ctx.channel)
+            await ctx.send(embed=embed)
+
+        return commands.Command(
+            _callback,
+            name=tag_name,
+            help=f"Display the `{tag_name}` tag.",
+        )
+
+    async def _sync_text_tag_commands(self):
+        existing = getattr(self, "_text_tag_commands", [])
+        for command in existing:
+            if self.bot.get_command(command.name) is command:
+                self.bot.remove_command(command.name)
+
+        data = await self._load_tags()
+        seen = set()
+        registered = []
+
+        for category_data in data.values():
+            for tag_name in category_data.keys():
+                if tag_name in seen:
+                    continue
+                seen.add(tag_name)
+
+                existing_command = self.bot.get_command(tag_name)
+                if existing_command is not None and getattr(existing_command, "cog", None) is not self:
+                    continue
+                if existing_command is not None and getattr(existing_command, "cog", None) is self:
+                    self.bot.remove_command(tag_name)
+
+                command = self._build_text_tag_command(tag_name)
+                self.bot.add_command(command)
+                registered.append(command)
+
+        self._text_tag_commands = registered
+
     async def _resolve_message_link(self, value: str) -> str:
         value = value.strip()
         if not value:
@@ -386,7 +436,11 @@ class SlashTags(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     async def cog_load(self):
+        await self._sync_text_tag_commands()
         self.bot.tree.add_command(self.manage)
 
     async def cog_unload(self):
         self.bot.tree.remove_command(self.manage.name)
+        for command in getattr(self, "_text_tag_commands", []):
+            self.bot.remove_command(command.name)
+        self._text_tag_commands = []

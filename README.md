@@ -2,6 +2,8 @@
 
 A Red-DiscordBot cog that exposes a persistent tag system through Discord slash commands.
 
+WARNING: The following file has been slopped up by copilot and only skimmed over by me
+
 ## Installation
 
 This cog is intended for an existing RedBot instance.

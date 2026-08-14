@@ -32,12 +32,16 @@ These commands are restricted to the configured admin role.
 ```text
 /managetags add_category category:newtohelpchat
 /managetags add_tag category:newtohelpchat tag:dontasktoask value:https://dontasktoask.com/
+/managetags edit_tag category:newtohelpchat tag:dontasktoask value:https://example.com/
+/managetags rename_tag category:newtohelpchat tag:dontasktoask new_tag:example
+/managetags rename_category category:newtohelpchat new_category:help
+/managetags move_tag category:newtohelpchat tag:dontasktoask new_category:newtohelpchat2
 /managetags list category:newtohelpchat
 /managetags delete_tag category:newtohelpchat tag:dontasktoask
 /managetags import_json json_data:{"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
 
-Use `.slash sync` or `ctrl + r` on discord client to see new slash commands faster
+> Warning: the slash command sync can take a little while to appear in Discord. If the slash commands do not show up immediately after loading the cog, wait a few minutes and re-run `.slash sync`.
 
 ### Importing the repo JSON file
 

@@ -68,6 +68,7 @@ class SlashTags(commands.Cog):
         self.manage.add_command(self._build_rename_category())
         self.manage.add_command(self._build_move_tag())
         self.manage.add_command(self._build_list_tags())
+        self.manage.add_command(self._build_preview_embed())
         self.manage.add_command(self._build_set_tag_embed())
         self.manage.add_command(self._build_toggle_text_commands())
         self.manage.add_command(self._build_import_json())
@@ -390,6 +391,26 @@ class SlashTags(commands.Cog):
             await interaction.response.send_message(f"Tags in `{category}`: {names}", ephemeral=True)
 
         return list_tags
+
+    def _build_preview_embed(self):
+        @app_commands.command(name="preview_embed", description="Preview the embed content that a message link would resolve to")
+        @app_commands.describe(messageLink="A Discord message link to preview")
+        async def preview_embed(interaction: discord.Interaction, messageLink: str):
+            if not self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            resolved = await self._resolve_message_link(messageLink)
+            if resolved == messageLink:
+                await interaction.response.send_message("That link could not be resolved to message content.", ephemeral=True)
+                return
+
+            embed = await self._build_tag_embed(resolved, interaction)
+            if embed.color is None:
+                embed.color = await self.bot.get_embed_color(interaction.channel)
+            await interaction.response.send_message(embed=embed)
+
+        return preview_embed
 
     def _build_set_tag_embed(self):
         @app_commands.command(name="set_tag_embed", description="Set whether an existing tag should display in an embed")

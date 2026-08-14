@@ -51,6 +51,7 @@ These commands are slash-only and restricted to the admin role (lowk hardcoded t
 /managetags add_category category:newtohelpchat
 /managetags add_tag category:newtohelpchat tag:dontasktoask value:https://dontasktoask.com/ embed:true
 /managetags edit_tag category:newtohelpchat tag:dontasktoask value:https://example.com/ embed:false
+/managetags preview_embed messageLink:https://discord.com/channels/123456789012345678/123456789012345678/123456789012345678
 /managetags set_tag_embed category:newtohelpchat tag:dontasktoask embed:false
 /managetags rename_tag category:newtohelpchat tag:dontasktoask new_tag:example
 /managetags rename_category category:newtohelpchat new_category:help

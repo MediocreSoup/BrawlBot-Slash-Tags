@@ -43,7 +43,7 @@ These commands are restricted to the configured admin role.
 /managetags import_json json_data:{"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
 
-> Warning: the slash command sync can take a little while to appear in Discord. If the slash commands do not show up immediately after loading the cog, wait a few minutes and re-run `.slash sync`.
+> Warning: the slash command sync can take a little while to appear in Discord. If the slash commands do not show up immediately after loading the cog, wait a few minutes and re-run `.slash sync` or `ctrl + r` on the discord client.
 
 ### Importing the repo JSON file
 

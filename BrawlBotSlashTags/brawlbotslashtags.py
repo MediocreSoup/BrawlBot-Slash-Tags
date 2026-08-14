@@ -46,6 +46,71 @@ async def tag_autocomplete(interaction: discord.Interaction, current: str):
     ]
 
 
+class TagFromMessageModal(discord.ui.Modal):
+    def __init__(self, cog, message):
+        self.cog = cog
+        self.message = message
+        super().__init__(title="Add tag from message")
+
+        self.category_input = discord.ui.TextInput(
+            label="Category",
+            placeholder="newtohelpchat",
+            required=True,
+            min_length=1,
+            max_length=100,
+        )
+        self.tag_input = discord.ui.TextInput(
+            label="Tag name",
+            placeholder="dontasktoask",
+            required=True,
+            min_length=1,
+            max_length=100,
+        )
+        self.embed_input = discord.ui.TextInput(
+            label="Embed enabled (true/false)",
+            placeholder="true",
+            required=True,
+            default="true",
+            min_length=4,
+            max_length=5,
+        )
+        self.add_item(self.category_input)
+        self.add_item(self.tag_input)
+        self.add_item(self.embed_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        category = self.category_input.value.strip()
+        tag = self.tag_input.value.strip()
+        embed_enabled = self.embed_input.value.strip().lower() in {"true", "1", "yes", "y", "on"}
+
+        if not category or not tag:
+            await interaction.response.send_message("Category and tag name are required.", ephemeral=True)
+            return
+
+        message_value = self.message.content.strip() if self.message.content.strip() else ""
+        if not message_value and self.message.embeds:
+            first_embed = self.message.embeds[0]
+            message_value = first_embed.description or first_embed.title or str(first_embed)
+        elif not message_value and self.message.attachments:
+            message_value = self.message.attachments[0].url
+        elif not message_value:
+            message_value = ""
+
+        if not message_value:
+            await interaction.response.send_message("That message does not contain usable text or media to save as a tag.", ephemeral=True)
+            return
+
+        data = await self.cog._load_tags()
+        data.setdefault(category, {})
+        stored = message_value if embed_enabled else {"value": message_value, "embed": False}
+        data[category][tag] = stored
+        await self.cog._save_tags(data)
+        await interaction.response.send_message(
+            f"Saved `{tag}` under `{category}` with embed={'on' if embed_enabled else 'off'}.",
+            ephemeral=True,
+        )
+
+
 class SlashTags(commands.Cog):
     """Slash-command tag lookup with persistent storage."""
 
@@ -525,6 +590,15 @@ class SlashTags(commands.Cog):
         if embed.color is None:
             embed.color = await self.bot.get_embed_color(interaction.channel)
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.context_menu(name="Add tag from message")
+    async def add_tag_from_message(self, interaction: discord.Interaction, message: discord.Message):
+        if not self._can_manage_tags(interaction):
+            await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+            return
+
+        modal = TagFromMessageModal(self, message)
+        await interaction.response.send_modal(modal)
 
     async def cog_load(self):
         await self._sync_text_tag_commands()

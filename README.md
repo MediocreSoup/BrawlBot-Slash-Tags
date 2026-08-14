@@ -61,6 +61,8 @@ These commands are slash-only and restricted to the admin role (lowk hardcoded t
 /managetags import_json json_data:{"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
 
+You can also right click a message -> Apps -> Add tag from message
+
 > Warning: the slash command sync can take a little while to appear in Discord. If the slash commands do not show up immediately after loading the cog, wait a few minutes and re-run `[p]slash sync` or `ctrl + r` on the discord.
 
 ### Importing the repo JSON file

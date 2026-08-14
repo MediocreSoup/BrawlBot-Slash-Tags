@@ -1,5 +1,7 @@
 import json
 import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 import discord
 from redbot.core import commands, app_commands
@@ -66,8 +68,17 @@ class SlashTags(commands.Cog):
     async def _load_tags(self):
         return await self.config.tags()
 
+    def _backup_tags(self, data):
+        backup_dir = Path(__file__).resolve().parent / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        backup_path = backup_dir / f"tags_backup_{timestamp}.json"
+        backup_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return backup_path
+
     async def _save_tags(self, data):
         await self.config.tags.set(data)
+        self._backup_tags(data)
 
     async def _resolve_message_link(self, value: str) -> str:
         value = value.strip()

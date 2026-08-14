@@ -208,15 +208,31 @@ class SlashTags(commands.Cog):
         return list_tags
 
     def _build_import_json(self):
-        @app_commands.command(name="import_json", description="Import tags from a JSON object")
-        @app_commands.describe(json_data="A JSON object mapping category names to tag dictionaries")
-        async def import_json(interaction: discord.Interaction, json_data: str):
+        @app_commands.command(name="import_json", description="Import tags from a JSON object or attached JSON file")
+        @app_commands.describe(json_data="A JSON object mapping category names to tag dictionaries", attachment="Optional JSON file to import")
+        async def import_json(
+            interaction: discord.Interaction,
+            json_data=None,
+            attachment=None,
+        ):
             if not interaction.user.get_role(ADMIN_ROLE_ID):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
+            if attachment is not None:
+                try:
+                    payload_text = (await attachment.read()).decode("utf-8")
+                except UnicodeDecodeError:
+                    await interaction.response.send_message("The attached JSON file is not valid UTF-8 text.", ephemeral=True)
+                    return
+            elif json_data is not None and json_data.strip():
+                payload_text = json_data
+            else:
+                await interaction.response.send_message("Provide either a JSON string or upload a JSON file.", ephemeral=True)
+                return
+
             try:
-                payload = json.loads(json_data)
+                payload = json.loads(payload_text)
             except json.JSONDecodeError:
                 await interaction.response.send_message("Invalid JSON payload.", ephemeral=True)
                 return

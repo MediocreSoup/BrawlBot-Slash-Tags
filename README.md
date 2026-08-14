@@ -6,28 +6,11 @@ A Red-DiscordBot cog that exposes a persistent tag system through Discord slash 
 
 This cog is intended for an existing RedBot instance.
 
-1. Add the repository:
-
 ```text
-[p]repo add BrawlBot-Slash-Tags https://github.com/MediocreSoup/BrawlBot-Slash-Tags
-```
-
-2. Install the cog:
-
-```text
-[p]cog install BrawlBot-Slash-Tags BrawlBotSlashTags
-```
-
-3. Load the cog:
-
-```text
-[p]load BrawlBotSlashTags
-```
-
-4. Sync slash commands:
-
-```text
-[p]slash sync
+.repo add BrawlBot-Slash-Tags https://github.com/MediocreSoup/BrawlBot-Slash-Tags
+.cog install BrawlBot-Slash-Tags BrawlBotSlashTags
+.load BrawlBotSlashTags
+.slash sync
 ```
 
 ## Commands
@@ -54,19 +37,27 @@ These commands are restricted to the configured admin role.
 /managetags import_json json_data:{"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
 
+Use `.slash sync` or `ctrl + r` on discord client to see new slash commands faster
+
 ### Importing the repo JSON file
 
 You can import the tag data from the JSON file you left in the repo, such as [BrawlBotTags14-08-2026.json](BrawlBotTags14-08-2026.json).
 
-Use the import command with the file's raw JSON payload:
+There are two supported ways to use it:
+
+1. Paste the raw JSON payload directly:
 
 ```text
 /managetags import_json json_data:{"__criticalregistry__":{"hi":"hello, world!"},"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
 
-If you want to import the entire file contents, paste the file's object JSON exactly as the value for `json_data`.
+2. Upload the JSON file as an attachment and run the command with no string value:
 
-The JSON import command merges category/tag data into the saved config without deleting existing values.
+```text
+/managetags import_json
+```
+
+Then attach the file in Discord when the command prompt asks for it. The command accepts either a raw JSON string or a JSON attachment, and it merges the imported data into the saved config without deleting existing tags.
 
 ## Notes
 

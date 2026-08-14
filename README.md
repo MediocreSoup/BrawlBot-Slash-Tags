@@ -2,6 +2,8 @@
 
 Repo for a cog adding slash commands for tags for brawlBot - a red bot instance - owned by iampizza in https://discord.gg/fRnC3KpMF
 
+This will only add additional slash commands from what I had available in the .tags command, I can make this support the legacy text commands too (pretty sure I only need to change 1 line) if you want so you dont have to update both this and the tags cog to add new tags
+
 ## Install Instructions onto existing RedBot instance
 
 notes:

@@ -148,6 +148,3 @@ class SlashTags(commands.Cog):
 
     async def cog_unload(self):
         self.bot.tree.remove_command(self.group.name)
-
-async def setup(bot):
-    await bot.add_cog(SlashTags(bot))

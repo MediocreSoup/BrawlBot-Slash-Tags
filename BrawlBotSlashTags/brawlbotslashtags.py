@@ -190,10 +190,11 @@ class SlashTags(commands.Cog):
                 await ctx.send(str(value))
                 return
 
-            embed = await self._build_tag_embed(value, ctx)
-            if embed.color is None:
-                embed.color = await self.bot.get_embed_color(ctx.channel)
-            await ctx.send(embed=embed)
+            embeds = await self._build_tag_embeds(value, ctx)
+            for index, embed in enumerate(embeds):
+                if embed.color is None:
+                    embed.color = await self.bot.get_embed_color(ctx.channel)
+                await ctx.send(embed=embed)
 
         return commands.Command(
             _callback,
@@ -262,18 +263,47 @@ class SlashTags(commands.Cog):
             return None, True
         return value, False
 
+    def _chunk_embed_text(self, text: str, max_chars: int = 4000):
+        text = text.strip()
+        if len(text) <= max_chars:
+            return [text]
+
+        chunks = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= max_chars:
+                chunks.append(remaining)
+                break
+
+            split_at = remaining.rfind(" ", 0, max_chars)
+            if split_at <= 0:
+                split_at = max_chars
+
+            chunk = remaining[:split_at].rstrip()
+            if chunk:
+                chunks.append(chunk)
+            remaining = remaining[split_at:].lstrip()
+
+        return chunks
+
     async def _build_tag_embed(self, value, interaction=None):
+        embeds = await self._build_tag_embeds(value, interaction)
+        return embeds[0] if embeds else discord.Embed(description=" ", color=0x5865F2)
+
+    async def _build_tag_embeds(self, value, interaction=None):
         if isinstance(value, discord.Embed):
-            return value
+            return [value]
 
         text = str(value).strip()
         if not text:
-            return discord.Embed(description=" ", color=0x5865F2)
+            channel = interaction.channel if interaction is not None and interaction.channel is not None else None
+            color = await self.bot.get_embed_color(channel) if channel is not None else 0x5865F2
+            return [discord.Embed(description=" ", color=color)]
 
         channel = interaction.channel if interaction is not None and interaction.channel is not None else None
         color = await self.bot.get_embed_color(channel) if channel is not None else 0x5865F2
-        embed = discord.Embed(description=text, color=color)
-        return embed
+        chunks = self._chunk_embed_text(text)
+        return [discord.Embed(description=chunk, color=color) for chunk in chunks]
 
     def _build_add_category(self):
         @app_commands.command(name="add_category", description="Create a new tag category")
@@ -490,10 +520,14 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message("That link could not be resolved to message content.", ephemeral=True)
                 return
 
-            embed = await self._build_tag_embed(resolved, interaction)
-            if embed.color is None:
-                embed.color = await self.bot.get_embed_color(interaction.channel)
-            await interaction.response.send_message(embed=embed)
+            embeds = await self._build_tag_embeds(resolved, interaction)
+            for index, embed in enumerate(embeds):
+                if embed.color is None:
+                    embed.color = await self.bot.get_embed_color(interaction.channel)
+                if index == 0:
+                    await interaction.response.send_message(embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed)
 
         return preview_embed
 
@@ -606,10 +640,14 @@ class SlashTags(commands.Cog):
             await interaction.response.send_message(str(value))
             return
 
-        embed = await self._build_tag_embed(value, interaction)
-        if embed.color is None:
-            embed.color = await self.bot.get_embed_color(interaction.channel)
-        await interaction.response.send_message(embed=embed)
+        embeds = await self._build_tag_embeds(value, interaction)
+        for index, embed in enumerate(embeds):
+            if embed.color is None:
+                embed.color = await self.bot.get_embed_color(interaction.channel)
+            if index == 0:
+                await interaction.response.send_message(embed=embed)
+            else:
+                await interaction.followup.send(embed=embed)
 
     @app_commands.context_menu(name="Add tag from message")
     async def add_tag_from_message(self, interaction: discord.Interaction, message: discord.Message):

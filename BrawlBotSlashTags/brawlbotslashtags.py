@@ -89,6 +89,9 @@ class TagFromMessageModal(discord.ui.Modal):
 
         message_value = self.message.content.strip() if self.message.content.strip() else ""
         if not message_value and self.message.embeds:
+            if not self.message.content.strip():
+                await interaction.response.send_message("That message is an embed-only message and cannot be saved as a tag.", ephemeral=True)
+                return
             first_embed = self.message.embeds[0]
             message_value = first_embed.description or first_embed.title or str(first_embed)
         elif not message_value and self.message.attachments:
@@ -231,34 +234,33 @@ class SlashTags(commands.Cog):
 
         self._text_tag_commands = registered
 
-    async def _resolve_message_link(self, value: str) -> str:
+    async def _resolve_message_link(self, value: str):
         value = value.strip()
         if not value:
-            return value
+            return value, False
 
         regex = r"https?://(?:canary\.|ptb\.|)discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)"
         match = re.search(regex, value)
         if not match:
-            return value
+            return value, False
 
         guild_id, channel_id, message_id = (int(part) for part in match.groups())
 
         guild = self.bot.get_guild(guild_id)
         channel = guild.get_channel(channel_id) if guild else self.bot.get_channel(channel_id)
         if channel is None:
-            return value
+            return value, False
 
         try:
             message = await channel.fetch_message(message_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            return value
+            return value, False
 
         if message.content:
-            return message.content
+            return message.content, False
         if message.embeds:
-            embed = message.embeds[0]
-            return embed.description or embed.title or str(embed)
-        return value
+            return None, True
+        return value, False
 
     async def _build_tag_embed(self, value, interaction=None):
         if isinstance(value, discord.Embed):
@@ -305,7 +307,13 @@ class SlashTags(commands.Cog):
             if category not in data:
                 data[category] = {}
 
-            resolved_value = await self._resolve_message_link(value)
+            resolved_value, is_embed_message = await self._resolve_message_link(value)
+            if is_embed_message:
+                await interaction.response.send_message(
+                    "That message link points to an embed-only message, which cannot be used as a tag value.",
+                    ephemeral=True,
+                )
+                return
             stored_value = resolved_value if embed else {"value": resolved_value, "embed": False}
             data[category][tag] = stored_value
             await self._save_tags(data)
@@ -327,7 +335,13 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
-            resolved_value = await self._resolve_message_link(value)
+            resolved_value, is_embed_message = await self._resolve_message_link(value)
+            if is_embed_message:
+                await interaction.response.send_message(
+                    "That message link points to an embed-only message, which cannot be used as a tag value.",
+                    ephemeral=True,
+                )
+                return
             data[category][tag] = resolved_value if embed else {"value": resolved_value, "embed": False}
             await self._save_tags(data)
             await interaction.response.send_message(f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
@@ -465,7 +479,13 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            resolved = await self._resolve_message_link(messageLink)
+            resolved, is_embed_message = await self._resolve_message_link(messageLink)
+            if is_embed_message:
+                await interaction.response.send_message(
+                    "That message link points to an embed-only message, which cannot be previewed as a tag.",
+                    ephemeral=True,
+                )
+                return
             if resolved == messageLink:
                 await interaction.response.send_message("That link could not be resolved to message content.", ephemeral=True)
                 return

@@ -174,6 +174,22 @@ class SlashTags(commands.Cog):
 
         return value, True
 
+    async def _send_tag_embeds(self, interaction, value, channel=None):
+        embeds = await self._build_tag_embeds(value, interaction)
+        for index, embed in enumerate(embeds):
+            if embed.color is None:
+                embed.color = await self.bot.get_embed_color(channel or interaction.channel)
+            if index == 0:
+                await interaction.response.send_message(embed=embed)
+            else:
+                await interaction.followup.send(embed=embed)
+
+    def _normalize_name(self, value, field_name):
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError(f"{field_name} cannot be empty.")
+        return cleaned
+
     def _build_text_tag_command(self, tag_name: str):
         async def _callback(ctx):
             data = await self._load_tags()
@@ -333,6 +349,13 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
+            try:
+                category = self._normalize_name(category, "Category")
+                tag = self._normalize_name(tag, "Tag")
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+
             data = await self._load_tags()
             if category not in data:
                 data[category] = {}
@@ -358,6 +381,13 @@ class SlashTags(commands.Cog):
         async def edit_tag(interaction: discord.Interaction, category: str, tag: str, value: str, embed: bool = True):
             if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            try:
+                category = self._normalize_name(category, "Category")
+                tag = self._normalize_name(tag, "Tag")
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
                 return
 
             data = await self._load_tags()
@@ -407,6 +437,14 @@ class SlashTags(commands.Cog):
         async def rename_tag(interaction: discord.Interaction, category: str, tag: str, new_tag: str):
             if not self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            try:
+                category = self._normalize_name(category, "Category")
+                tag = self._normalize_name(tag, "Tag")
+                new_tag = self._normalize_name(new_tag, "New tag")
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
                 return
 
             data = await self._load_tags()
@@ -640,14 +678,7 @@ class SlashTags(commands.Cog):
             await interaction.response.send_message(str(value))
             return
 
-        embeds = await self._build_tag_embeds(value, interaction)
-        for index, embed in enumerate(embeds):
-            if embed.color is None:
-                embed.color = await self.bot.get_embed_color(interaction.channel)
-            if index == 0:
-                await interaction.response.send_message(embed=embed)
-            else:
-                await interaction.followup.send(embed=embed)
+        await self._send_tag_embeds(interaction, value)
 
     @app_commands.context_menu(name="Add tag from message")
     async def add_tag_from_message(self, interaction: discord.Interaction, message: discord.Message):

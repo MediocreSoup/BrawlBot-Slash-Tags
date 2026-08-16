@@ -705,15 +705,6 @@ class SlashTags(commands.Cog):
 
         await self._send_tag_embeds(interaction, value)
 
-    @app_commands.context_menu(name="Add tag from message")
-    async def add_tag_from_message(self, interaction: discord.Interaction, message: discord.Message):
-        if not self._can_manage_tags(interaction):
-            await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
-            return
-
-        modal = TagFromMessageModal(self, message)
-        await interaction.response.send_modal(modal)
-
     async def cog_load(self):
         await self._sync_text_tag_commands()
         self.bot.tree.add_command(self.manage)

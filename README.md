@@ -57,6 +57,8 @@ If you need to grant access in Redbot, set the admin role or add the user/role d
 [p]permissions add @SomeUser admin
 ```
 
+Note: "value" arguments below for adding/editing tags can be either raw text or a discord message link.
+
 ```text
 /managetags add_category category:newtohelpchat
 /managetags add_tag category:newtohelpchat tag:dontasktoask value:https://dontasktoask.com/ embed:true
@@ -70,8 +72,6 @@ If you need to grant access in Redbot, set the admin role or add the user/role d
 /managetags delete_tag category:newtohelpchat tag:dontasktoask
 /managetags import_json json_data:{"newtohelpchat":{"dontasktoask":"https://dontasktoask.com/"}}
 ```
-
-You can also right click a message -> Apps -> Add tag from message
 
 > Warning: the slash command sync can take a little while to appear in Discord. If the slash commands do not show up immediately after loading the cog, wait a few minutes and re-run `[p]slash sync` or `ctrl + r` on the discord.
 

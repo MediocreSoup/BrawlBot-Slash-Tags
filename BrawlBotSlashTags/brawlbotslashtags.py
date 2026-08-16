@@ -9,8 +9,6 @@ from redbot.core.config import Config
 
 # all tags are wrapped inside embeds
 
-ADMIN_ROLE_ID = 1200986093286342846
-
 
 async def category_autocomplete(interaction: discord.Interaction, current: str):
     cog = interaction.client.get_cog("SlashTags")
@@ -146,7 +144,10 @@ class SlashTags(commands.Cog):
             return False
         if not isinstance(interaction.user, discord.Member):
             return False
-        return interaction.user.get_role(ADMIN_ROLE_ID) is not None
+
+        if self.bot.is_admin(interaction.user):
+            return True
+        return interaction.user.guild_permissions.administrator
 
     async def _load_tags(self):
         return await self.config.tags()
@@ -281,6 +282,8 @@ class SlashTags(commands.Cog):
 
     def _chunk_embed_text(self, text: str, max_chars: int = 4000):
         text = text.strip()
+        if not text:
+            return [""]
         if len(text) <= max_chars:
             return [text]
 
@@ -291,16 +294,31 @@ class SlashTags(commands.Cog):
                 chunks.append(remaining)
                 break
 
-            split_at = remaining.rfind(" ", 0, max_chars)
-            if split_at <= 0:
-                split_at = max_chars
+            split_at = max_chars
+            newline_idx = remaining.rfind("\n", 0, max_chars)
+            if newline_idx > 0:
+                split_at = newline_idx
+            else:
+                space_idx = remaining.rfind(" ", 0, max_chars)
+                if space_idx > 0:
+                    split_at = space_idx
 
             chunk = remaining[:split_at].rstrip()
-            if chunk:
-                chunks.append(chunk)
+            if not chunk:
+                chunk = remaining[:max_chars].rstrip()
+            if not chunk:
+                break
+
+            chunks.append(chunk)
             remaining = remaining[split_at:].lstrip()
 
         return chunks
+
+    def _has_duplicate_tag_name(self, data, tag_name: str):
+        for category_tags in data.values():
+            if isinstance(category_tags, dict) and tag_name in category_tags:
+                return True
+        return False
 
     async def _build_tag_embed(self, value, interaction=None):
         embeds = await self._build_tag_embeds(value, interaction)
@@ -359,6 +377,13 @@ class SlashTags(commands.Cog):
             data = await self._load_tags()
             if category not in data:
                 data[category] = {}
+
+            if self._has_duplicate_tag_name(data, tag):
+                await interaction.response.send_message(
+                    f"A tag named `{tag}` already exists somewhere in the tag database.",
+                    ephemeral=True,
+                )
+                return
 
             resolved_value, is_embed_message = await self._resolve_message_link(value)
             if is_embed_message:
@@ -452,8 +477,8 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
-            if new_tag in data[category]:
-                await interaction.response.send_message(f"A tag named `{new_tag}` already exists in `{category}`.", ephemeral=True)
+            if new_tag in data[category] or self._has_duplicate_tag_name(data, new_tag):
+                await interaction.response.send_message(f"A tag named `{new_tag}` already exists in the tag database.", ephemeral=True)
                 return
 
             value = data[category].pop(tag)

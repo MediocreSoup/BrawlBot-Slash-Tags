@@ -47,7 +47,15 @@ Text commands:
 
 ### Manage tags
 
-These commands are slash-only and restricted to the admin role (lowk hardcoded the role ID im sure its fine, to change the required role ID go to `line 12` of `BrawlBotSlashTags/brawlbotslashtags.py`).
+These commands are slash-only and restricted to users with Redbot admin permissions or guild administrator permissions.
+
+If you need to grant access in Redbot, set the admin role or add the user/role directly:
+
+```text
+[p]setadminrole Admin
+[p]permissions addrole @Admins admin
+[p]permissions add @SomeUser admin
+```
 
 ```text
 /managetags add_category category:newtohelpchat

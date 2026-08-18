@@ -97,6 +97,38 @@ Then attach the file in Discord when the command prompt asks for it.
 
 The command accepts either a raw JSON string or a JSON attachment, and it merges the imported data into the saved config without deleting existing tags. Legacy plain-string tags still load correctly; plain-text overrides can be stored as `{ "value": "...", "embed": false }`.
 
+### Tag arguments
+
+Tag templates can include ordered placeholders such as `{name}` and `{city}`. When a tag uses arguments, the bot validates that the number and order of values match the placeholders in the template.
+
+Example template stored for the tag:
+
+```text
+Hello {name}, welcome to {city}! We are in [interaction.guild.name].
+```
+
+Examples:
+
+```text
+/tag category:welcome tag:greet arguments:"Ava \"Paris, France\""
+```
+
+This resolves to:
+
+```text
+Hello Ava, welcome to Paris, France! We are in Example Guild.
+```
+
+Important behavior:
+
+- Arguments are ordered, so `{name}` must be first and `{city}` second.
+- Quoted values keep spaces, for example `"Paris, France"` stays one argument.
+- Use backslashes to keep literal braces or brackets in a tag: `\{name}` and `\[interaction.user.name]`.
+- Interaction values are supported with bracket syntax, such as `[interaction.user.name]`, `[interaction.guild.name]`, and `[interaction.user.id]`.
+- All arguments are required and a mismatch of provided arguments will yield a warning message.
+
+>>> To look up available interaction values, see https://discordpy.readthedocs.io/en/latest/interactions/api.html
+
 ## Notes
 
 - Tags are automatically backed up as json files every tag change, they are stored in the backups folder inside this cog

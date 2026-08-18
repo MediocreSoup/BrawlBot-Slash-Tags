@@ -320,6 +320,147 @@ class SlashTags(commands.Cog):
                 return True
         return False
 
+    def _extract_tag_argument_names(self, value):
+        if value is None:
+            return []
+
+        text = str(value)
+        names = []
+        index = 0
+        while index < len(text):
+            if text[index] == "\\":
+                if index + 1 < len(text) and text[index + 1] in {"{", "[", "\\"}:
+                    index += 2
+                    continue
+                index += 1
+                continue
+
+            if text[index] == "{":
+                end = text.find("}", index + 1)
+                if end == -1:
+                    break
+
+                name = text[index + 1:end].strip()
+                if name and re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                    names.append(name)
+                index = end + 1
+                continue
+
+            index += 1
+
+        return names
+
+    def _split_tag_arguments(self, arguments_text):
+        if arguments_text is None:
+            return []
+
+        arguments_text = str(arguments_text).strip()
+        if not arguments_text:
+            return []
+
+        try:
+            import shlex
+            return shlex.split(arguments_text)
+        except ValueError:
+            return arguments_text.split()
+
+    def _resolve_interaction_reference(self, interaction, expression):
+        if interaction is None or not isinstance(expression, str):
+            return None
+
+        expression = expression.strip()
+        if not expression:
+            return None
+
+        if expression.startswith("interaction"):
+            target = interaction
+            parts = expression.split(".")
+        else:
+            return None
+
+        for part in parts[1:]:
+            if not part or part.startswith("_"):
+                return None
+            if not hasattr(target, part):
+                return None
+            target = getattr(target, part)
+            if callable(target):
+                return None
+
+        return target
+
+    def _resolve_tag_string(self, value, arguments=None, interaction=None):
+        text = str(value)
+        if arguments is None:
+            arguments = {}
+
+        result = []
+        index = 0
+        while index < len(text):
+            ch = text[index]
+
+            if ch == "\\":
+                if index + 1 < len(text):
+                    next_ch = text[index + 1]
+                    if next_ch in {"\\", "{", "["}:
+                        result.append(next_ch)
+                        index += 2
+                        continue
+                result.append("\\")
+                index += 1
+                continue
+
+            if ch == "{":
+                end = text.find("}", index + 1)
+                if end == -1:
+                    result.append(ch)
+                    index += 1
+                    continue
+
+                name = text[index + 1:end].strip()
+                if name and re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                    result.append(str(arguments.get(name, "")))
+                else:
+                    result.append(text[index:end + 1])
+                index = end + 1
+                continue
+
+            if ch == "[":
+                end = text.find("]", index + 1)
+                if end == -1:
+                    result.append(ch)
+                    index += 1
+                    continue
+
+                expression = text[index + 1:end].strip()
+                resolved = self._resolve_interaction_reference(interaction, expression)
+                if resolved is not None:
+                    result.append(str(resolved))
+                else:
+                    result.append(text[index:end + 1])
+                index = end + 1
+                continue
+
+            result.append(ch)
+            index += 1
+
+        return "".join(result)
+
+    def _validate_tag_arguments(self, value, provided_arguments):
+        expected = self._extract_tag_argument_names(value)
+        provided = list(provided_arguments or [])
+
+        if not expected:
+            if provided:
+                return False, "This tag does not support tag arguments."
+            return True, ""
+
+        if len(provided) != len(expected):
+            expected_text = ", ".join(f'"{name}"' for name in expected)
+            return False, f'This tag requires tag arguments in order: {expected_text}.'
+
+        return True, ""
+
     async def _build_tag_embed(self, value, interaction=None):
         embeds = await self._build_tag_embeds(value, interaction)
         return embeds[0] if embeds else discord.Embed(description=" ", color=0x5865F2)
@@ -395,6 +536,16 @@ class SlashTags(commands.Cog):
             stored_value = resolved_value if embed else {"value": resolved_value, "embed": False}
             data[category][tag] = stored_value
             await self._save_tags(data)
+
+            argument_names = self._extract_tag_argument_names(resolved_value)
+            if argument_names:
+                formatted = ", ".join(f'"{name}"' for name in argument_names)
+                await interaction.response.send_message(
+                    f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}. Warning: this tag uses tag arguments in order: {formatted}. To show literal braces or bracket syntax, escape them as \\{{name}} or \\[interaction.user.name].",
+                    ephemeral=True,
+                )
+                return
+
             await interaction.response.send_message(f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
 
         return add_tag
@@ -429,6 +580,16 @@ class SlashTags(commands.Cog):
                 return
             data[category][tag] = resolved_value if embed else {"value": resolved_value, "embed": False}
             await self._save_tags(data)
+
+            argument_names = self._extract_tag_argument_names(resolved_value)
+            if argument_names:
+                formatted = ", ".join(f'"{name}"' for name in argument_names)
+                await interaction.response.send_message(
+                    f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}. Warning: this tag uses tag arguments in order: {formatted}. To show literal braces or bracket syntax, escape them as \\{{name}} or \\[interaction.user.name].",
+                    ephemeral=True,
+                )
+                return
+
             await interaction.response.send_message(f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
 
         return edit_tag
@@ -688,9 +849,9 @@ class SlashTags(commands.Cog):
         return import_json
 
     @app_commands.command(name="tag")
-    @app_commands.describe(category="The tag category", tag="The tag name")
+    @app_commands.describe(category="The tag category", tag="The tag name", arguments="Ordered values for any tag arguments, quoted as needed")
     @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
-    async def tag(self, interaction: discord.Interaction, category: str, tag: str):
+    async def tag(self, interaction: discord.Interaction, category: str, tag: str, arguments: str = ""):
         data = await self._load_tags()
         value = data.get(category, {}).get(tag)
 
@@ -699,11 +860,20 @@ class SlashTags(commands.Cog):
             return
 
         value, should_embed = self._normalize_tag_value(value)
-        if not should_embed:
-            await interaction.response.send_message(str(value))
+        parsed_arguments = self._split_tag_arguments(arguments)
+        valid, warning = self._validate_tag_arguments(value, parsed_arguments)
+        if not valid:
+            await interaction.response.send_message(warning, ephemeral=True)
             return
 
-        await self._send_tag_embeds(interaction, value)
+        resolved_arguments = dict(zip(self._extract_tag_argument_names(value), parsed_arguments))
+        rendered = self._resolve_tag_string(value, resolved_arguments, interaction)
+
+        if not should_embed:
+            await interaction.response.send_message(str(rendered))
+            return
+
+        await self._send_tag_embeds(interaction, rendered)
 
     async def cog_load(self):
         await self._sync_text_tag_commands()

@@ -672,6 +672,15 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category name to create")
         @app_commands.autocomplete(category=category_autocomplete)
         async def add_category(interaction: discord.Interaction, category: str):
+            try:
+                category = self._normalize_name(category, "Category")
+            except ValueError as exc:
+                await interaction.response.send_message(
+                    str(exc),
+                    ephemeral=True,
+                )
+                return
+            
             if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
@@ -952,6 +961,7 @@ class SlashTags(commands.Cog):
         async def move_tag(interaction: discord.Interaction, category: str, tag: str, new_category: str):
             try:
                 category = self._normalize_name(category, "category")
+                tag = self._normalize_name(tag, "tag")
                 new_category = self._normalize_name(new_category, "new_category")
             except ValueError as exc:
                 await interaction.response.send_message(str(exc), ephemeral=True)
@@ -1092,17 +1102,31 @@ class SlashTags(commands.Cog):
         return set_tag_embed
 
     def _build_toggle_text_commands(self):
-        @app_commands.command(name="toggle_text_commands", description="Enable or disable dynamic text tag commands")
-        @app_commands.describe(enabled="Whether text tag commands should be enabled")
-        async def toggle_text_commands(interaction: discord.Interaction, enabled: bool):
+        @app_commands.command(
+            name="toggle_text_commands",
+            description="Enable or disable text tag commands",
+        )
+        @app_commands.describe(
+            enabled="Whether text tag commands should be enabled"
+        )
+        async def toggle_text_commands(
+            interaction: discord.Interaction,
+            enabled: bool,
+        ):
             if not await self._can_manage_tags(interaction):
-                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                await interaction.response.send_message(
+                    "You do not have permission to manage tags.",
+                    ephemeral=True,
+                )
                 return
 
-            await self.config.guild(interaction.guild).text_commands_enabled.set(enabled)
-            await self._sync_text_tag_commands(interaction.guild)
+            await self.config.guild(
+                interaction.guild
+            ).text_commands_enabled.set(enabled)
+
             await interaction.response.send_message(
-                f"Text tag commands are now {'enabled' if enabled else 'disabled'}.",
+                f"Text tag commands are now "
+                f"{'enabled' if enabled else 'disabled'}.",
                 ephemeral=True,
             )
 

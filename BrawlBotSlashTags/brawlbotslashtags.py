@@ -1359,4 +1359,4 @@ class SlashTags(commands.Cog):
         requester: str,
         user_id: int,
     ) -> typing.NoReturn:
-        raise commands.RedUnhandledAPI()
+        pass

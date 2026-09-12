@@ -696,7 +696,7 @@ class SlashTags(commands.Cog):
         return add_category
 
     def _build_add_tag(self):
-        @app_commands.command(name="add_tag", description="Add or update a tag")
+        @app_commands.command(name="add_tag", description="Add a new tag")
         @app_commands.describe(
             category="The category to save into",
             tag="The tag name",

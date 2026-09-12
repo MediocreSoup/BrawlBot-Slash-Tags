@@ -6,7 +6,14 @@
       "value": "https://tenor.com/view/bro-frogs-tree-frog-gif-5275848",
       "embed": false
     },
-    "whatislove": "https://youtu.be/z09V14x48NI"
+    "soup": {
+      "value": "soup",
+      "embed": false
+    },
+    "whatislove": {
+      "value": "https://youtu.be/z09V14x48NI",
+      "embed": false
+    }
   },
   "newtohelpchat": {
     "dontasktoask": "https://dontasktoask.com/",

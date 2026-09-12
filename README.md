@@ -77,14 +77,14 @@ Note: "value" arguments below for adding/editing tags can be either raw text or 
 
 ### Importing the repo JSON file
 
-You can import the tag data from the JSON file I left in the repo, such as [BrawlBotTags14-08-2026.json](BrawlBotTags14-08-2026.json).
+You can import the tag data from the JSON file included in the repo, such as [BrawlBotTags12-09-2026.json](BrawlBotTags12-09-2026.json).
 
 There are two supported ways to use it:
 
-1. Upload the JSON file as an attachment and run the command with no string value:
+1. Drag and drop the JSON file into the Discord chat bar using the `attachment` parameter:
 
 ```text
-/managetags import_json
+/managetags import_json attachment:[upload BrawlBotTags12-09-2026.json]
 ```
 
 2. Paste the raw JSON payload directly:
@@ -130,7 +130,7 @@ Important behavior:
 >>> To look up available interaction values, see https://discordpy.readthedocs.io/en/latest/interactions/api.html
 
 ## Notes
-
-- Tags are automatically backed up as json files every tag change, they are stored in the backups folder inside this cog
+ 
+- Tags are scoped per guild and automatically backed up as JSON files in Redbot's data directory upon every modification (retaining the 20 most recent backups per guild).
 - Values can be raw text or a Discord message link; message links are resolved to the linked message content before saving.
 - If everything burns down, you have full permission to send angry messages to @MediocreSoup on discord 👍

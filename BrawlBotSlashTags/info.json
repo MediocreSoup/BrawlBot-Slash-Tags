@@ -2,5 +2,7 @@
     "author": ["MediocreSoup"],
     "description": "Replaces the tags cog with slash commands for BrawlBot, commands are /tag and /managetags",
     "short": "Slash commands for BrawlBot tags",
-    "min_python_version": [3, 8, 10]
+    "min_python_version": [3, 8, 10],
+    "min_bot_version": "3.5.0",
+    "end_user_data_statement": "This cog does not store any persistent personal data."
 }

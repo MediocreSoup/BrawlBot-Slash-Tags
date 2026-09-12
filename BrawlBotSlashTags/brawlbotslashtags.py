@@ -1,11 +1,27 @@
+from __future__ import annotations
 import json
 import re
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
+import typing
 
 import discord
 from redbot.core import commands, app_commands
+from redbot.core.data_manager import cog_data_path
 from redbot.core.config import Config
+
+# Safe top-level interaction attributes that can be traversed with [interaction.*] syntax.
+_INTERACTION_ALLOWLIST = {
+    "user",
+    "guild",
+    "channel",
+}
+# Safe leaf attributes reachable from each of the above.
+_INTERACTION_SAFE_ATTRS = {
+    "name", "id", "display_name", "mention",
+    "nick", "global_name",
+}
 
 # all tags are wrapped inside embeds
 
@@ -15,7 +31,7 @@ async def category_autocomplete(interaction: discord.Interaction, current: str):
     if cog is None:
         return []
 
-    data = await cog._load_tags()
+    data = await cog._load_tags(interaction.guild)
     categories = [name for name in data.keys() if current.lower() in name.lower()]
     return [
         app_commands.Choice(name=name, value=name)
@@ -28,9 +44,10 @@ async def tag_autocomplete(interaction: discord.Interaction, current: str):
     if cog is None:
         return []
 
-    data = await cog._load_tags()
-    namespace = getattr(interaction, "namespace", {}) or {}
-    category = namespace.get("category")
+    data = await cog._load_tags(interaction.guild)
+    # interaction.namespace is an app_commands.Namespace, not a dict — use getattr
+    namespace = getattr(interaction, "namespace", None)
+    category = getattr(namespace, "category", None)
 
     if category:
         tags = list(data.get(category, {}).keys())
@@ -44,81 +61,15 @@ async def tag_autocomplete(interaction: discord.Interaction, current: str):
     ]
 
 
-class TagFromMessageModal(discord.ui.Modal):
-    def __init__(self, cog, message):
-        self.cog = cog
-        self.message = message
-        super().__init__(title="Add tag from message")
-
-        self.category_input = discord.ui.TextInput(
-            label="Category",
-            placeholder="newtohelpchat",
-            required=True,
-            min_length=1,
-            max_length=100,
-        )
-        self.tag_input = discord.ui.TextInput(
-            label="Tag name",
-            placeholder="dontasktoask",
-            required=True,
-            min_length=1,
-            max_length=100,
-        )
-        self.embed_input = discord.ui.TextInput(
-            label="Embed enabled (true/false)",
-            placeholder="true",
-            required=True,
-            default="true",
-            min_length=4,
-            max_length=5,
-        )
-        self.add_item(self.category_input)
-        self.add_item(self.tag_input)
-        self.add_item(self.embed_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        category = self.category_input.value.strip()
-        tag = self.tag_input.value.strip()
-        embed_enabled = self.embed_input.value.strip().lower() in {"true", "1", "yes", "y", "on"}
-
-        if not category or not tag:
-            await interaction.response.send_message("Category and tag name are required.", ephemeral=True)
-            return
-
-        message_value = self.message.content.strip() if self.message.content.strip() else ""
-        if not message_value and self.message.embeds:
-            if not self.message.content.strip():
-                await interaction.response.send_message("That message is an embed-only message and cannot be saved as a tag.", ephemeral=True)
-                return
-            first_embed = self.message.embeds[0]
-            message_value = first_embed.description or first_embed.title or str(first_embed)
-        elif not message_value and self.message.attachments:
-            message_value = self.message.attachments[0].url
-        elif not message_value:
-            message_value = ""
-
-        if not message_value:
-            await interaction.response.send_message("That message does not contain usable text or media to save as a tag.", ephemeral=True)
-            return
-
-        data = await self.cog._load_tags()
-        data.setdefault(category, {})
-        stored = message_value if embed_enabled else {"value": message_value, "embed": False}
-        data[category][tag] = stored
-        await self.cog._save_tags(data)
-        await interaction.response.send_message(
-            f"Saved `{tag}` under `{category}` with embed={'on' if embed_enabled else 'off'}.",
-            ephemeral=True,
-        )
-
 
 class SlashTags(commands.Cog):
-    """Slash-command tag lookup with persistent storage."""
+    """Slash-command tag lookup with persistent storage, scoped per guild."""
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=881728942000123456)
-        self.config.register_global(tags={}, text_commands_enabled=True)
+        self.config.register_guild(tags={}, text_commands_enabled=True)
+        self._text_tag_commands: typing.Dict[int, list] = {}
 
         self.manage = app_commands.Group(
             name="managetags",
@@ -130,6 +81,7 @@ class SlashTags(commands.Cog):
         self.manage.add_command(self._build_add_tag())
         self.manage.add_command(self._build_edit_tag())
         self.manage.add_command(self._build_delete_tag())
+        self.manage.add_command(self._build_delete_category())
         self.manage.add_command(self._build_rename_tag())
         self.manage.add_command(self._build_rename_category())
         self.manage.add_command(self._build_move_tag())
@@ -139,30 +91,98 @@ class SlashTags(commands.Cog):
         self.manage.add_command(self._build_toggle_text_commands())
         self.manage.add_command(self._build_import_json())
 
-    def _can_manage_tags(self, interaction: discord.Interaction) -> bool:
+    # ---------------------------------------------------------------------------
+    # Permission guard
+    # ---------------------------------------------------------------------------
+
+    async def _can_manage_tags(self, interaction: discord.Interaction) -> bool:
         if interaction.guild is None:
             return False
         if not isinstance(interaction.user, discord.Member):
             return False
-
-        if self.bot.is_admin(interaction.user):
+        if await self.bot.is_owner(interaction.user):
+            return True
+        if await self.bot.is_admin(interaction.user):
             return True
         return interaction.user.guild_permissions.administrator
 
-    async def _load_tags(self):
-        return await self.config.tags()
+    # ---------------------------------------------------------------------------
+    # Config helpers — all tag access is scoped to the guild
+    # ---------------------------------------------------------------------------
 
-    def _backup_tags(self, data):
-        backup_dir = Path(__file__).resolve().parent / "backups"
-        backup_dir.mkdir(exist_ok=True)
+    async def _load_tags(self, guild: typing.Optional[discord.Guild]):
+        if guild is None:
+            return {}
+        return await self.config.guild(guild).tags()
+
+    async def _save_tags(self, guild: discord.Guild, data: dict):
+        await self.config.guild(guild).tags.set(data)
+        self._backup_tags(guild, data)
+        await self._sync_text_tag_commands(guild)
+
+    # ---------------------------------------------------------------------------
+    # Backups — stored in Redbot's data directory, not the cog installation dir
+    # ---------------------------------------------------------------------------
+
+    def _backup_tags(self, guild: discord.Guild, data: dict):
+        backup_dir = cog_data_path(self) / "backups" / str(guild.id)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
         backup_path = backup_dir / f"tags_backup_{timestamp}.json"
         backup_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        return backup_path
 
-    async def _save_tags(self, data):
-        await self.config.tags.set(data)
-        self._backup_tags(data)
+        # Prune: keep only the 20 most recent backups
+        backups = sorted(backup_dir.glob("tags_backup_*.json"))
+        for old in backups[:-20]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    # ---------------------------------------------------------------------------
+    # Text tag command sync — called automatically after every save
+    # ---------------------------------------------------------------------------
+
+    async def _sync_text_tag_commands(self, guild: discord.Guild):
+        """Register / deregister prefix text commands for all tags in this guild."""
+        guild_id = guild.id
+
+        # Remove all previously registered text commands for this guild
+        for command in self._text_tag_commands.get(guild_id, []):
+            if self.bot.get_command(command.name) is command:
+                self.bot.remove_command(command.name)
+        self._text_tag_commands[guild_id] = []
+
+        if not await self.config.guild(guild).text_commands_enabled():
+            return
+
+        data = await self._load_tags(guild)
+        seen = set()
+        registered = []
+
+        for category_data in data.values():
+            for tag_name in category_data.keys():
+                if tag_name in seen:
+                    continue
+                seen.add(tag_name)
+
+                existing_command = self.bot.get_command(tag_name)
+                if existing_command is not None and getattr(existing_command, "cog", None) is not self:
+                    continue
+                if existing_command is not None and getattr(existing_command, "cog", None) is self:
+                    self.bot.remove_command(tag_name)
+
+                command = self._build_text_tag_command(tag_name)
+                self.bot.add_command(command)
+                registered.append(command)
+
+        self._text_tag_commands[guild_id] = registered
+
+    async def _sync_all_text_tag_commands(self):
+        """Re-sync text tag commands for every guild the bot is in on cog load."""
+        for guild in self.bot.guilds:
+            await self._sync_text_tag_commands(guild)
 
     def _normalize_tag_value(self, value):
         if isinstance(value, dict):
@@ -192,8 +212,8 @@ class SlashTags(commands.Cog):
         return cleaned
 
     def _build_text_tag_command(self, tag_name: str):
-        async def _callback(ctx):
-            data = await self._load_tags()
+        async def _callback(ctx, *args):
+            data = await self._load_tags(ctx.guild)
             for category_data in data.values():
                 if tag_name in category_data:
                     value = category_data[tag_name]
@@ -203,12 +223,21 @@ class SlashTags(commands.Cog):
                 return
 
             value, should_embed = self._normalize_tag_value(value)
-            if not should_embed:
-                await ctx.send(str(value))
+            parsed_arguments = list(args)
+            valid, warning = self._validate_tag_arguments(value, parsed_arguments)
+            if not valid:
+                await ctx.send(warning)
                 return
 
-            embeds = await self._build_tag_embeds(value, ctx)
-            for index, embed in enumerate(embeds):
+            resolved_arguments = dict(zip(self._extract_tag_argument_names(value), parsed_arguments))
+            rendered = self._resolve_tag_string(value, resolved_arguments)
+
+            if not should_embed:
+                await ctx.send(str(rendered))
+                return
+
+            embeds = await self._build_tag_embeds(rendered, ctx)
+            for embed in embeds:
                 if embed.color is None:
                     embed.color = await self.bot.get_embed_color(ctx.channel)
                 await ctx.send(embed=embed)
@@ -219,38 +248,6 @@ class SlashTags(commands.Cog):
             help=f"Display the `{tag_name}` tag.",
         )
 
-    async def _sync_text_tag_commands(self):
-        existing = getattr(self, "_text_tag_commands", [])
-        for command in existing:
-            if self.bot.get_command(command.name) is command:
-                self.bot.remove_command(command.name)
-
-        self._text_tag_commands = []
-
-        if not await self.config.text_commands_enabled():
-            return
-
-        data = await self._load_tags()
-        seen = set()
-        registered = []
-
-        for category_data in data.values():
-            for tag_name in category_data.keys():
-                if tag_name in seen:
-                    continue
-                seen.add(tag_name)
-
-                existing_command = self.bot.get_command(tag_name)
-                if existing_command is not None and getattr(existing_command, "cog", None) is not self:
-                    continue
-                if existing_command is not None and getattr(existing_command, "cog", None) is self:
-                    self.bot.remove_command(tag_name)
-
-                command = self._build_text_tag_command(tag_name)
-                self.bot.add_command(command)
-                registered.append(command)
-
-        self._text_tag_commands = registered
 
     async def _resolve_message_link(self, value: str):
         value = value.strip()
@@ -326,6 +323,7 @@ class SlashTags(commands.Cog):
 
         text = str(value)
         names = []
+        seen_names = set()
         index = 0
         while index < len(text):
             if text[index] == "\\":
@@ -341,8 +339,9 @@ class SlashTags(commands.Cog):
                     break
 
                 name = text[index + 1:end].strip()
-                if name and re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                if name and re.fullmatch(r"[A-Za-z0-9_-]+", name) and name not in seen_names:
                     names.append(name)
+                    seen_names.add(name)
                 index = end + 1
                 continue
 
@@ -359,12 +358,18 @@ class SlashTags(commands.Cog):
             return []
 
         try:
-            import shlex
             return shlex.split(arguments_text)
         except ValueError:
             return arguments_text.split()
 
     def _resolve_interaction_reference(self, interaction, expression):
+        """Safely resolve whitelisted [interaction.x.y] references.
+
+        Only top-level attributes in _INTERACTION_ALLOWLIST are traversed from
+        the interaction object, and only leaf attributes in _INTERACTION_SAFE_ATTRS
+        are returned. This prevents leaking bot internals such as
+        interaction.client.http.token.
+        """
         if interaction is None or not isinstance(expression, str):
             return None
 
@@ -372,22 +377,36 @@ class SlashTags(commands.Cog):
         if not expression:
             return None
 
-        if expression.startswith("interaction"):
-            target = interaction
-            parts = expression.split(".")
-        else:
+        if not expression.startswith("interaction."):
             return None
 
-        for part in parts[1:]:
-            if not part or part.startswith("_"):
-                return None
-            if not hasattr(target, part):
-                return None
-            target = getattr(target, part)
-            if callable(target):
-                return None
+        parts = expression.split(".")
+        # parts[0] == "interaction", parts[1] == top-level attr, parts[2] == leaf
+        if len(parts) < 2 or len(parts) > 3:
+            return None
 
-        return target
+        top_attr = parts[1]
+        if top_attr not in _INTERACTION_ALLOWLIST:
+            return None
+
+        target = getattr(interaction, top_attr, None)
+        if target is None:
+            return None
+
+        if len(parts) == 2:
+            # Direct attribute on interaction itself (e.g. [interaction.guild])
+            if top_attr in _INTERACTION_SAFE_ATTRS | _INTERACTION_ALLOWLIST and not callable(target):
+                return target
+            return None
+
+        # len(parts) == 3
+        leaf_attr = parts[2]
+        if leaf_attr not in _INTERACTION_SAFE_ATTRS:
+            return None
+        result = getattr(target, leaf_attr, None)
+        if callable(result):
+            return None
+        return result
 
     def _resolve_tag_string(self, value, arguments=None, interaction=None):
         text = str(value)
@@ -485,14 +504,14 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category name to create")
         @app_commands.autocomplete(category=category_autocomplete)
         async def add_category(interaction: discord.Interaction, category: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data:
                 data[category] = {}
-                await self._save_tags(data)
+                await self._save_tags(interaction.guild, data)
                 await interaction.response.send_message(f"Created category `{category}`.", ephemeral=True)
                 return
             await interaction.response.send_message(f"Category `{category}` already exists.", ephemeral=True)
@@ -501,10 +520,15 @@ class SlashTags(commands.Cog):
 
     def _build_add_tag(self):
         @app_commands.command(name="add_tag", description="Add or update a tag")
-        @app_commands.describe(category="The category to save into", tag="The tag name", value="A Discord message link or raw text", embed="Whether this tag should display in an embed")
+        @app_commands.describe(
+            category="The category to save into",
+            tag="The tag name",
+            value="A Discord message link or raw text",
+            embed="Whether this tag should display in an embed",
+        )
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def add_tag(interaction: discord.Interaction, category: str, tag: str, value: str, embed: bool = True):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -515,47 +539,56 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(str(exc), ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            # Defer early — message link resolution involves a network request
+            await interaction.response.defer(ephemeral=True)
+
+            data = await self._load_tags(interaction.guild)
             if category not in data:
                 data[category] = {}
 
             if self._has_duplicate_tag_name(data, tag):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"A tag named `{tag}` already exists somewhere in the tag database.",
-                    ephemeral=True,
                 )
                 return
 
             resolved_value, is_embed_message = await self._resolve_message_link(value)
             if is_embed_message:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "That message link points to an embed-only message, which cannot be used as a tag value.",
-                    ephemeral=True,
                 )
                 return
             stored_value = resolved_value if embed else {"value": resolved_value, "embed": False}
             data[category][tag] = stored_value
-            await self._save_tags(data)
+            await self._save_tags(interaction.guild, data)
 
             argument_names = self._extract_tag_argument_names(resolved_value)
             if argument_names:
                 formatted = ", ".join(f'"{name}"' for name in argument_names)
-                await interaction.response.send_message(
-                    f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}. Warning: this tag uses tag arguments in order: {formatted}. To show literal braces or bracket syntax, escape them as \\{{name}} or \\[interaction.user.name].",
-                    ephemeral=True,
+                await interaction.followup.send(
+                    f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}. "
+                    f'Warning: this tag uses tag arguments in order: {formatted}. '
+                    r"To show literal braces or bracket syntax, escape them as \{name} or \[interaction.user.name].",
                 )
                 return
 
-            await interaction.response.send_message(f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
+            await interaction.followup.send(
+                f"Saved `{tag}` under `{category}` with embed={'on' if embed else 'off'}."
+            )
 
         return add_tag
 
     def _build_edit_tag(self):
         @app_commands.command(name="edit_tag", description="Edit an existing tag")
-        @app_commands.describe(category="The tag category", tag="The tag name", value="The new value", embed="Whether this tag should display in an embed")
+        @app_commands.describe(
+            category="The tag category",
+            tag="The tag name",
+            value="The new value",
+            embed="Whether this tag should display in an embed",
+        )
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def edit_tag(interaction: discord.Interaction, category: str, tag: str, value: str, embed: bool = True):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -566,31 +599,35 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(str(exc), ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            await interaction.response.defer(ephemeral=True)
+
+            data = await self._load_tags(interaction.guild)
             if category not in data or tag not in data[category]:
-                await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
+                await interaction.followup.send(f"`{tag}` does not exist in `{category}`.")
                 return
 
             resolved_value, is_embed_message = await self._resolve_message_link(value)
             if is_embed_message:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "That message link points to an embed-only message, which cannot be used as a tag value.",
-                    ephemeral=True,
                 )
                 return
             data[category][tag] = resolved_value if embed else {"value": resolved_value, "embed": False}
-            await self._save_tags(data)
+            await self._save_tags(interaction.guild, data)
 
             argument_names = self._extract_tag_argument_names(resolved_value)
             if argument_names:
                 formatted = ", ".join(f'"{name}"' for name in argument_names)
-                await interaction.response.send_message(
-                    f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}. Warning: this tag uses tag arguments in order: {formatted}. To show literal braces or bracket syntax, escape them as \\{{name}} or \\[interaction.user.name].",
-                    ephemeral=True,
+                await interaction.followup.send(
+                    f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}. "
+                    f'Warning: this tag uses tag arguments in order: {formatted}. '
+                    r"To show literal braces or bracket syntax, escape them as \{name} or \[interaction.user.name].",
                 )
                 return
 
-            await interaction.response.send_message(f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}.", ephemeral=True)
+            await interaction.followup.send(
+                f"Updated `{tag}` in `{category}` with embed={'on' if embed else 'off'}."
+            )
 
         return edit_tag
 
@@ -599,11 +636,11 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category to remove from", tag="The tag name")
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def delete_tag(interaction: discord.Interaction, category: str, tag: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data or tag not in data[category]:
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
@@ -611,17 +648,44 @@ class SlashTags(commands.Cog):
             del data[category][tag]
             if not data[category]:
                 del data[category]
-            await self._save_tags(data)
+            await self._save_tags(interaction.guild, data)
             await interaction.response.send_message(f"Deleted `{tag}` from `{category}`.", ephemeral=True)
 
         return delete_tag
 
+    def _build_delete_category(self):
+        @app_commands.command(name="delete_category", description="Delete an entire tag category and all its tags")
+        @app_commands.describe(category="The category to delete")
+        @app_commands.autocomplete(category=category_autocomplete)
+        async def delete_category(interaction: discord.Interaction, category: str):
+            if not await self._can_manage_tags(interaction):
+                await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
+                return
+
+            data = await self._load_tags(interaction.guild)
+            if category not in data:
+                await interaction.response.send_message(f"Category `{category}` does not exist.", ephemeral=True)
+                return
+
+            tag_count = len(data[category])
+            del data[category]
+            await self._save_tags(interaction.guild, data)
+            await interaction.response.send_message(
+                f"Deleted category `{category}` and {tag_count} tag(s).", ephemeral=True
+            )
+
+        return delete_category
+
     def _build_rename_tag(self):
         @app_commands.command(name="rename_tag", description="Rename an existing tag")
-        @app_commands.describe(category="The category the tag is in", tag="The current tag name", new_tag="The new tag name")
+        @app_commands.describe(
+            category="The category the tag is in",
+            tag="The current tag name",
+            new_tag="The new tag name",
+        )
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def rename_tag(interaction: discord.Interaction, category: str, tag: str, new_tag: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
@@ -633,19 +697,23 @@ class SlashTags(commands.Cog):
                 await interaction.response.send_message(str(exc), ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data or tag not in data[category]:
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
             if new_tag in data[category] or self._has_duplicate_tag_name(data, new_tag):
-                await interaction.response.send_message(f"A tag named `{new_tag}` already exists in the tag database.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"A tag named `{new_tag}` already exists in the tag database.", ephemeral=True
+                )
                 return
 
             value = data[category].pop(tag)
             data[category][new_tag] = value
-            await self._save_tags(data)
-            await interaction.response.send_message(f"Renamed `{tag}` to `{new_tag}` in `{category}`.", ephemeral=True)
+            await self._save_tags(interaction.guild, data)
+            await interaction.response.send_message(
+                f"Renamed `{tag}` to `{new_tag}` in `{category}`.", ephemeral=True
+            )
 
         return rename_tag
 
@@ -654,11 +722,11 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The current category name", new_category="The new category name")
         @app_commands.autocomplete(category=category_autocomplete)
         async def rename_category(interaction: discord.Interaction, category: str, new_category: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data:
                 await interaction.response.send_message(f"Category `{category}` does not exist.", ephemeral=True)
                 return
@@ -668,40 +736,52 @@ class SlashTags(commands.Cog):
                 return
 
             data[new_category] = data.pop(category)
-            await self._save_tags(data)
-            await interaction.response.send_message(f"Renamed category `{category}` to `{new_category}`.", ephemeral=True)
+            await self._save_tags(interaction.guild, data)
+            await interaction.response.send_message(
+                f"Renamed category `{category}` to `{new_category}`.", ephemeral=True
+            )
 
         return rename_category
 
     def _build_move_tag(self):
         @app_commands.command(name="move_tag", description="Move a tag into a different category")
-        @app_commands.describe(category="The current category", tag="The tag name", new_category="The destination category")
+        @app_commands.describe(
+            category="The current category",
+            tag="The tag name",
+            new_category="The destination category",
+        )
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def move_tag(interaction: discord.Interaction, category: str, tag: str, new_category: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data or tag not in data[category]:
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
             if new_category == category:
-                await interaction.response.send_message("The destination category is the same as the current category.", ephemeral=True)
+                await interaction.response.send_message(
+                    "The destination category is the same as the current category.", ephemeral=True
+                )
                 return
 
             data.setdefault(new_category, {})
             if tag in data[new_category]:
-                await interaction.response.send_message(f"A tag named `{tag}` already exists in `{new_category}`.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"A tag named `{tag}` already exists in `{new_category}`.", ephemeral=True
+                )
                 return
 
             value = data[category].pop(tag)
             data[new_category][tag] = value
             if not data[category]:
                 del data[category]
-            await self._save_tags(data)
-            await interaction.response.send_message(f"Moved `{tag}` from `{category}` to `{new_category}`.", ephemeral=True)
+            await self._save_tags(interaction.guild, data)
+            await interaction.response.send_message(
+                f"Moved `{tag}` from `{category}` to `{new_category}`.", ephemeral=True
+            )
 
         return move_tag
 
@@ -710,11 +790,11 @@ class SlashTags(commands.Cog):
         @app_commands.describe(category="The category to list")
         @app_commands.autocomplete(category=category_autocomplete)
         async def list_tags(interaction: discord.Interaction, category: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             tags = data.get(category, {})
             if not tags:
                 await interaction.response.send_message(f"No tags found for `{category}`.", ephemeral=True)
@@ -726,30 +806,36 @@ class SlashTags(commands.Cog):
         return list_tags
 
     def _build_preview_embed(self):
-        @app_commands.command(name="preview_embed", description="Preview the embed content that a message link would resolve to")
+        @app_commands.command(
+            name="preview_embed",
+            description="Preview the embed content that a message link would resolve to",
+        )
         @app_commands.describe(messageLink="A Discord message link to preview")
         async def preview_embed(interaction: discord.Interaction, messageLink: str):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
+            await interaction.response.defer(ephemeral=True)
+
             resolved, is_embed_message = await self._resolve_message_link(messageLink)
             if is_embed_message:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "That message link points to an embed-only message, which cannot be previewed as a tag.",
-                    ephemeral=True,
                 )
                 return
             if resolved == messageLink:
-                await interaction.response.send_message("That link could not be resolved to message content.", ephemeral=True)
+                await interaction.followup.send("That link could not be resolved to message content.")
                 return
 
             embeds = await self._build_tag_embeds(resolved, interaction)
-            for index, embed in enumerate(embeds):
+            first = True
+            for embed in embeds:
                 if embed.color is None:
                     embed.color = await self.bot.get_embed_color(interaction.channel)
-                if index == 0:
-                    await interaction.response.send_message(embed=embed)
+                if first:
+                    await interaction.followup.send(embed=embed)
+                    first = False
                 else:
                     await interaction.followup.send(embed=embed)
 
@@ -757,21 +843,25 @@ class SlashTags(commands.Cog):
 
     def _build_set_tag_embed(self):
         @app_commands.command(name="set_tag_embed", description="Set whether an existing tag should display in an embed")
-        @app_commands.describe(category="The tag category", tag="The tag name", embed="Whether this tag should display in an embed")
+        @app_commands.describe(
+            category="The tag category",
+            tag="The tag name",
+            embed="Whether this tag should display in an embed",
+        )
         @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
         async def set_tag_embed(interaction: discord.Interaction, category: str, tag: str, embed: bool):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            data = await self._load_tags()
+            data = await self._load_tags(interaction.guild)
             if category not in data or tag not in data[category]:
                 await interaction.response.send_message(f"`{tag}` does not exist in `{category}`.", ephemeral=True)
                 return
 
             value, _ = self._normalize_tag_value(data[category][tag])
             data[category][tag] = value if embed else {"value": value, "embed": False}
-            await self._save_tags(data)
+            await self._save_tags(interaction.guild, data)
             await interaction.response.send_message(
                 f"`{tag}` in `{category}` now {'uses an embed' if embed else 'sends as plain text'}.",
                 ephemeral=True,
@@ -783,12 +873,12 @@ class SlashTags(commands.Cog):
         @app_commands.command(name="toggle_text_commands", description="Enable or disable dynamic text tag commands")
         @app_commands.describe(enabled="Whether text tag commands should be enabled")
         async def toggle_text_commands(interaction: discord.Interaction, enabled: bool):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
-            await self.config.text_commands_enabled.set(enabled)
-            await self._sync_text_tag_commands()
+            await self.config.guild(interaction.guild).text_commands_enabled.set(enabled)
+            await self._sync_text_tag_commands(interaction.guild)
             await interaction.response.send_message(
                 f"Text tag commands are now {'enabled' if enabled else 'disabled'}.",
                 ephemeral=True,
@@ -798,61 +888,71 @@ class SlashTags(commands.Cog):
 
     def _build_import_json(self):
         @app_commands.command(name="import_json", description="Import tags from a JSON object or attached JSON file")
-        @app_commands.describe(json_data="A JSON object mapping category names to tag dictionaries", attachment="Optional JSON file to import")
+        @app_commands.describe(
+            json_data="A JSON object mapping category names to tag dictionaries",
+            attachment="Optional JSON file to import (drag the file into Discord)",
+        )
         async def import_json(
             interaction: discord.Interaction,
             json_data: str = None,
             attachment: discord.Attachment = None,
         ):
-            if not self._can_manage_tags(interaction):
+            if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
+
+            await interaction.response.defer(ephemeral=True)
 
             if attachment is not None:
                 try:
                     payload_text = (await attachment.read()).decode("utf-8")
                 except UnicodeDecodeError:
-                    await interaction.response.send_message("The attached JSON file is not valid UTF-8 text.", ephemeral=True)
+                    await interaction.followup.send("The attached JSON file is not valid UTF-8 text.")
                     return
             elif json_data is not None and json_data.strip():
                 payload_text = json_data
             else:
-                await interaction.response.send_message("Provide either a JSON string or upload a JSON file.", ephemeral=True)
+                await interaction.followup.send("Provide either a JSON string or upload a JSON file.")
                 return
 
             try:
                 payload = json.loads(payload_text)
             except json.JSONDecodeError:
-                await interaction.response.send_message("Invalid JSON payload.", ephemeral=True)
+                await interaction.followup.send("Invalid JSON payload.")
                 return
 
             if not isinstance(payload, dict):
-                await interaction.response.send_message("The JSON payload must be an object keyed by category name.", ephemeral=True)
+                await interaction.followup.send("The JSON payload must be an object keyed by category name.")
                 return
 
-            merged = await self._load_tags()
+            merged = await self._load_tags(interaction.guild)
             for category, tags in payload.items():
                 if not isinstance(tags, dict):
-                    await interaction.response.send_message(f"Category `{category}` is not a valid object of tags.", ephemeral=True)
+                    await interaction.followup.send(f"Category `{category}` is not a valid object of tags.")
                     return
                 merged.setdefault(category, {})
                 for tag_name, tag_value in tags.items():
-                    if isinstance(tag_value, dict):
-                        if "value" in tag_value or "content" in tag_value or "text" in tag_value:
-                            merged[category][tag_name] = tag_value
-                            continue
                     merged[category][tag_name] = tag_value
 
-            await self._save_tags(merged)
-            await interaction.response.send_message("Imported tags from JSON.", ephemeral=True)
+            await self._save_tags(interaction.guild, merged)
+            await interaction.followup.send("Imported tags from JSON.")
 
         return import_json
 
+    # ---------------------------------------------------------------------------
+    # /tag slash command
+    # ---------------------------------------------------------------------------
+
     @app_commands.command(name="tag")
-    @app_commands.describe(category="The tag category", tag="The tag name", arguments="Ordered values for any tag arguments, quoted as needed")
+    @app_commands.describe(
+        category="The tag category",
+        tag="The tag name",
+        arguments="Ordered values for any tag arguments, quoted as needed",
+    )
     @app_commands.autocomplete(category=category_autocomplete, tag=tag_autocomplete)
+    @app_commands.guild_only()
     async def tag(self, interaction: discord.Interaction, category: str, tag: str, arguments: str = ""):
-        data = await self._load_tags()
+        data = await self._load_tags(interaction.guild)
         value = data.get(category, {}).get(tag)
 
         if value is None:
@@ -875,12 +975,25 @@ class SlashTags(commands.Cog):
 
         await self._send_tag_embeds(interaction, rendered)
 
+    # ---------------------------------------------------------------------------
+    # Cog lifecycle
+    # ---------------------------------------------------------------------------
+
     async def cog_load(self):
-        await self._sync_text_tag_commands()
+        await self._sync_all_text_tag_commands()
         self.bot.tree.add_command(self.manage)
 
     async def cog_unload(self):
         self.bot.tree.remove_command(self.manage.name)
-        for command in getattr(self, "_text_tag_commands", []):
-            self.bot.remove_command(command.name)
-        self._text_tag_commands = []
+        for commands_list in self._text_tag_commands.values():
+            for command in commands_list:
+                self.bot.remove_command(command.name)
+        self._text_tag_commands = {}
+
+    # ---------------------------------------------------------------------------
+    # Redbot data privacy compliance
+    # ---------------------------------------------------------------------------
+
+    async def red_delete_data_for_user(self, *, requester, user_id):
+        # This cog stores no personal data tied to individual users.
+        pass

@@ -27,7 +27,7 @@ Note: `[p]` is the prefix for the bot, in brawlbot's case "."
 
 Tags are organised into categories.
 
-The command name is `/tag` or `[p][tagname]`, and tags default to embed output unless explicitly set to plain text with `/managetags set_tag_embed ... embed:false` or a JSON object using `"embed": false`.
+The command name is `/tag` or `[p][tagname]`, and tags default to embed output unless explicitly set to plain text with `/managetags set_tag_embed ... embed:false` or a JSON object using `{ "value": "...", "embed": false }`.
 
 Slash commands:
 

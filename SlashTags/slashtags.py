@@ -1037,21 +1037,21 @@ class SlashTags(commands.Cog):
             name="preview_embed",
             description="Preview the embed content that a message link would resolve to",
         )
-        @app_commands.describe(messageLink="A Discord message link to preview")
-        async def preview_embed(interaction: discord.Interaction, messageLink: str):
+        @app_commands.describe(message_link="A Discord message link to preview")
+        async def preview_embed(interaction: discord.Interaction, message_link: str):
             if not await self._can_manage_tags(interaction):
                 await interaction.response.send_message("You do not have permission to manage tags.", ephemeral=True)
                 return
 
             await interaction.response.defer(ephemeral=True)
 
-            resolved, is_embed_message = await self._resolve_message_link(messageLink)
+            resolved, is_embed_message = await self._resolve_message_link(message_link)
             if is_embed_message:
                 await interaction.followup.send(
                     "That message link points to an embed-only message, which cannot be previewed as a tag.",
                 )
                 return
-            if resolved == messageLink:
+            if resolved == message_link:
                 await interaction.followup.send("That link could not be resolved to message content.")
                 return
 

@@ -1344,6 +1344,15 @@ class SlashTags(commands.Cog):
 
     async def cog_load(self):
         self.bot.tree.add_command(self.manage)
+        
+        print("=== SlashTags cog_load ===")
+        print("Tree commands:")
+        for command in self.bot.tree.get_commands():
+            print(
+                command.name,
+                type(command).__name__,
+                getattr(command, "qualified_name", None),
+            )
 
 
     async def cog_unload(self):

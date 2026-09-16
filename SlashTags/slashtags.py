@@ -1343,15 +1343,41 @@ class SlashTags(commands.Cog):
     # ---------------------------------------------------------------------------
 
     async def cog_load(self):
+        import redbot
+        import inspect
+
         print("=== SlashTags cog_load ===")
 
+        print("Red version:", getattr(redbot, "__version__", "unknown"))
+        print("discord.py version:", discord.__version__)
+
+        print("tree:", self.bot.tree)
+        print("tree type:", type(self.bot.tree))
+        print("add_command:", self.bot.tree.add_command)
+        print("add_command owner:", getattr(self.bot.tree.add_command, "__qualname__", None))
+
+        print("\n=== manage ===")
+        print("manage:", self.manage)
+        print("manage type:", type(self.manage))
+        print("manage name:", self.manage.name)
+        print("manage parent:", self.manage.parent)
+        print("manage root_parent:", self.manage.root_parent)
+        print("manage guild_ids:", self.manage.guild_ids)
+        print("manage extras:", self.manage.extras)
+
+        print("\n=== BEFORE ===")
         print("tree commands:", self.bot.tree.get_commands())
+        print("disabled globals:", self.bot.tree._disabled_global_commands)
 
-        print("disabled commands:")
-        print(self.bot.tree._disabled_global_commands)
+        print("\n=== ADDING ===")
+        self.bot.tree.add_command(self.manage)
 
-        print("enabled slash commands:")
-        print(await self.bot.list_enabled_app_commands())
+        print("tree commands:", self.bot.tree.get_commands())
+        print("disabled globals:", self.bot.tree._disabled_global_commands)
+
+        print("\n=== COG APP COMMANDS ===")
+        print("get_app_commands:", self.get_app_commands())
+        print("__cog_app_commands__:", self.__cog_app_commands__)
 
 
     async def cog_unload(self):

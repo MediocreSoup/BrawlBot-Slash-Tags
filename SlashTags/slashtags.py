@@ -1348,11 +1348,10 @@ class SlashTags(commands.Cog):
         print("tree commands:", self.bot.tree.get_commands())
 
         print("disabled commands:")
-        for name, command in self.bot.tree._disabled_global_commands.items():
-            print(
-                f"  {name!r}: {command!r} "
-                f"type={type(command).__name__}"
-            )
+        print(self.bot.tree._disabled_global_commands)
+
+        print("enabled slash commands:")
+        print(await self.bot.list_enabled_app_commands())
 
 
     async def cog_unload(self):

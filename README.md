@@ -28,8 +28,8 @@ This cog is intended for an existing Red-DiscordBot instance.
 
 ```text
 [p]repo add BrawlBot-Slash-Tags https://github.com/MediocreSoup/BrawlBot-Slash-Tags
-[p]cog install BrawlBot-Slash-Tags BrawlBotSlashTags
-[p]load BrawlBotSlashTags
+[p]cog install brawlBot-Slash-Tags SlashTags
+[p]load SlashTags
 [p]slash sync
 ```
 

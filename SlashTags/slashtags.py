@@ -1345,18 +1345,14 @@ class SlashTags(commands.Cog):
     async def cog_load(self):
         print("=== SlashTags cog_load ===")
 
-        print("manage object:", self.manage)
-        print("manage name:", self.manage.name)
-        print("manage type:", type(self.manage))
+        print("tree commands:", self.bot.tree.get_commands())
 
-        print("BEFORE:", self.bot.tree.get_commands())
-
-        result = self.bot.tree.add_command(self.manage)
-
-        print("add_command result:", result)
-        print("AFTER:", self.bot.tree.get_commands())
-
-        print("tree get manage:", self.bot.tree.get_command("managetags"))
+        print("disabled commands:")
+        for name, command in self.bot.tree._disabled_global_commands.items():
+            print(
+                f"  {name!r}: {command!r} "
+                f"type={type(command).__name__}"
+            )
 
 
     async def cog_unload(self):

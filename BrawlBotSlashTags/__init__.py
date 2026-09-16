@@ -1,4 +1,4 @@
-from .brawlbotslashtags import SlashTags
+from .slashtags import SlashTags
 
 
 async def setup(bot):

@@ -1345,6 +1345,21 @@ class SlashTags(commands.Cog):
     async def cog_load(self):
         print("=== SlashTags cog_load ===")
 
+        print("app commands:", self.get_app_commands())
+
+        for command in self.get_app_commands():
+            print(
+                "APP COMMAND:",
+                command,
+                "name=", command.name,
+                "parent=", command.parent,
+                "guild_ids=", getattr(command, "_guild_ids", None),
+                "module=", command.module,
+            )
+
+        print("tree global:", self.bot.tree._global_commands)
+        print("tree disabled:", self.bot.tree._disabled_global_commands)
+
         print("\n=== VERSIONS ===")
         import redbot
         print("Red:", redbot.__version__)

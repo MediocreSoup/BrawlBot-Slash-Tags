@@ -1343,41 +1343,38 @@ class SlashTags(commands.Cog):
     # ---------------------------------------------------------------------------
 
     async def cog_load(self):
-        import redbot
-        import inspect
-
         print("=== SlashTags cog_load ===")
 
-        print("Red version:", getattr(redbot, "__version__", "unknown"))
-        print("discord.py version:", discord.__version__)
+        print("\n=== VERSIONS ===")
+        import redbot
+        print("Red:", redbot.__version__)
+        print("discord.py:", discord.__version__)
 
-        print("tree:", self.bot.tree)
-        print("tree type:", type(self.bot.tree))
-        print("add_command:", self.bot.tree.add_command)
-        print("add_command owner:", getattr(self.bot.tree.add_command, "__qualname__", None))
-
-        print("\n=== manage ===")
+        print("\n=== MANAGE ===")
         print("manage:", self.manage)
-        print("manage type:", type(self.manage))
-        print("manage name:", self.manage.name)
-        print("manage parent:", self.manage.parent)
-        print("manage root_parent:", self.manage.root_parent)
-        print("manage guild_ids:", self.manage.guild_ids)
-        print("manage extras:", self.manage.extras)
-
-        print("\n=== BEFORE ===")
-        print("tree commands:", self.bot.tree.get_commands())
-        print("disabled globals:", self.bot.tree._disabled_global_commands)
-
-        print("\n=== ADDING ===")
-        self.bot.tree.add_command(self.manage)
-
-        print("tree commands:", self.bot.tree.get_commands())
-        print("disabled globals:", self.bot.tree._disabled_global_commands)
+        print("type:", type(self.manage))
+        print("name:", self.manage.name)
+        print("parent:", self.manage.parent)
+        print("root_parent:", self.manage.root_parent)
+        print("guild_only:", self.manage.guild_only)
+        print("extras:", self.manage.extras)
 
         print("\n=== COG APP COMMANDS ===")
         print("get_app_commands:", self.get_app_commands())
-        print("__cog_app_commands__:", self.__cog_app_commands__)
+
+        print("\n=== TREE BEFORE ===")
+        print("tree:", self.bot.tree.get_commands())
+        print("disabled:", self.bot.tree._disabled_global_commands)
+
+        print("\n=== ADD MANAGE ===")
+        self.bot.tree.add_command(self.manage)
+
+        print("tree:", self.bot.tree.get_commands())
+        print("disabled:", self.bot.tree._disabled_global_commands)
+
+        print("\n=== TREE LOOKUPS ===")
+        print("tag:", self.bot.tree.get_command("tag"))
+        print("managetags:", self.bot.tree.get_command("managetags"))
 
 
     async def cog_unload(self):
